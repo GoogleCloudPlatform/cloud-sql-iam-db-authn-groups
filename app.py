@@ -1,10 +1,30 @@
+"""
+Copyright 2021 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
 import os
-from quart import Quart, render_template, websocket
-import sqlalchemy 
+from quart import Quart
+import sqlalchemy
 
 app = Quart(__name__)
 
+
 def init_connection_engine():
+    """Configure and initialize database connection pool.
+
+    Configures the parameters for the database connection pool. Initiliazes the database connection pool either through TCP (private IP) or via Unix socket (public IP).
+    """
     db_config = {
         "pool_size": 5,
         "max_overflow": 2,
@@ -19,6 +39,16 @@ def init_connection_engine():
 
 
 def init_tcp_connection_engine(db_config):
+    """Load and initialize database connection pool via TCP connection.
+
+    Loads in the parameters for the database connection pool. Initiliazes the database connection pool through TCP which is recommended route for private IP.
+
+    Args:
+        db_config: A dict mapping database config parameters to their corresponding values.
+
+    Returns:
+        A database connection pool instance.
+    """
     db_user = os.environ["DB_USER"]
     db_pass = os.environ["DB_PASS"]
     db_name = os.environ["DB_NAME"]
@@ -45,6 +75,16 @@ def init_tcp_connection_engine(db_config):
 
 
 def init_unix_connection_engine(db_config):
+    """Load and initialize database connection pool via Unix socket connection.
+
+    Loads in the parameters for the database connection pool. Initiliazes the database connection pool through Unix socket which is recommended route for public IP.
+
+    Args:
+        db_config: A dict mapping database config parameters to their corresponding values.
+
+    Returns:
+        A database connection pool instance.
+    """
     db_user = os.environ["DB_USER"]
     db_pass = os.environ["DB_PASS"]
     db_name = os.environ["DB_NAME"]
@@ -69,7 +109,9 @@ def init_unix_connection_engine(db_config):
     )
     return pool
 
+
 db = init_connection_engine()
+
 
 @app.route("/", methods=["GET"])
 def get_time():
