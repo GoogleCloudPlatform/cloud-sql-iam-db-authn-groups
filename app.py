@@ -23,7 +23,9 @@ app = Quart(__name__)
 def init_connection_engine():
     """Configure and initialize database connection pool.
 
-    Configures the parameters for the database connection pool. Initiliazes the database connection pool either through TCP (private IP) or via Unix socket (public IP).
+    Configures the parameters for the database connection pool. Initiliazes the
+    database connection pool either through TCP (private IP) or via Unix socket
+    (public IP).
     """
     db_config = {
         "pool_size": 5,
@@ -41,10 +43,12 @@ def init_connection_engine():
 def init_tcp_connection_engine(db_config):
     """Load and initialize database connection pool via TCP connection.
 
-    Loads in the parameters for the database connection pool. Initiliazes the database connection pool through TCP which is recommended route for private IP.
+    Loads in the parameters for the database connection pool. Initiliazes the
+    database connection pool through TCP which is recommended route for private IP.
 
     Args:
-        db_config: A dict mapping database config parameters to their corresponding values.
+        db_config: A dict mapping database config parameters to their corresponding
+            values.
 
     Returns:
         A database connection pool instance.
@@ -77,10 +81,13 @@ def init_tcp_connection_engine(db_config):
 def init_unix_connection_engine(db_config):
     """Load and initialize database connection pool via Unix socket connection.
 
-    Loads in the parameters for the database connection pool. Initiliazes the database connection pool through Unix socket which is recommended route for public IP.
+    Loads in the parameters for the database connection pool. Initiliazes
+    the database connection pool through Unix socket which is recommended route for
+    public IP.
 
     Args:
-        db_config: A dict mapping database config parameters to their corresponding values.
+        db_config: A dict mapping database config parameters to their corresponding
+            values.
 
     Returns:
         A database connection pool instance.
