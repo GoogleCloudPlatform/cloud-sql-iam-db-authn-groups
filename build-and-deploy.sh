@@ -16,3 +16,4 @@ gcloud beta run deploy iam-db-authn-groups \
   --update-secrets=DB_NAME=DB_NAME:latest \
   --update-secrets=CLOUD_SQL_CONNECTION_NAME=CLOUD_SQL_CONNECTION_NAME:latest \
   --project $PROJECT_ID
+  
