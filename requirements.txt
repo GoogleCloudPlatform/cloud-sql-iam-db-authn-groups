@@ -1,1 +1,4 @@
-quart
+quart==0.15.1
+hypercorn==0.11.2
+SQLAlchemy==1.4.22
+PyMySQL==1.0.2
