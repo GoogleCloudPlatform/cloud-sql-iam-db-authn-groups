@@ -1,7 +1,8 @@
 #! /bin/bash
 
-export CLOUD_SQL_CONNECTION_NAME=
-export PROJECT_ID=
+# variables required for below commands to properly build and deploy Cloud Run
+export CLOUD_SQL_CONNECTION_NAME= # i.e "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>"
+export PROJECT_ID= # project ID of project in which you want to deploy the service within
 
 gcloud builds submit \
   --tag gcr.io/$PROJECT_ID/iam-db-authn-groups \
