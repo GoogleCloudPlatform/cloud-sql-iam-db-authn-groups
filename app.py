@@ -15,8 +15,37 @@
 import os
 from quart import Quart
 import sqlalchemy
+import json
 
 app = Quart(__name__)
+
+
+def load_config(filename):
+    """Load in params from json config file.
+
+    Loading in configurable parameters for service which are Cloud SQL Instance
+    names and IAM Group names.
+
+    Args:
+        filename: The name of the configurable json file.
+
+    Returns:
+        sql_instances: List of all Cloud SQL instances to configure.
+        iam_groups: List of all IAM Groups to manage DB users of.
+    """
+    with open(filename) as json_file:
+        config = json.load(json_file)
+        json_file.close()
+
+    sql_instances  = config['sql_instances']
+    iam_groups = config['iam_groups']
+
+    # verify config params are not empty
+    if sql_instances is None or sql_instances == []:
+        raise ValueError("No valid Cloud SQL instances configured, please verify your config.json.")
+    if iam_groups is None or iam_groups == []:
+        raise ValueError("No valid IAM Groups configured, please verify your config.json.")
+    return sql_instances, iam_groups
 
 
 def init_connection_engine():
