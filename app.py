@@ -16,6 +16,8 @@ import os
 from quart import Quart
 import sqlalchemy
 import json
+from google.auth import compute_engine
+from googleapiclient.discovery import build
 
 app = Quart(__name__)
 
@@ -145,7 +147,12 @@ def init_unix_connection_engine(db_config):
     return pool
 
 
+# initialize db connection pool
 db = init_connection_engine()
+
+# get oauth credentials
+SCOPES = ['https://www.googleapis.com/auth/admin.directory.group']
+credentials = compute_engine.Credentials(scopes=SCOPES)
 
 
 @app.route("/", methods=["GET"])
@@ -155,3 +162,14 @@ def get_time():
             "SELECT NOW()").fetchone()
         print(f"Time: {str(current_time[0])}")
     return str(current_time[0])
+
+
+@app.route("/users", methods=["GET"])
+def get_iam_users():
+    # Call the Admin SDK Directory API
+    service = build('admin', 'directory_v1', credentials=credentials)
+    results = service.members().list(groupKey='jackgroup@cloudadvocacyorg.joonix.net', maxResults=100).execute()
+    users = results.get('members', [])
+    for user in users:
+        print(f"User: {user['email']}")
+    return "Got users!"
