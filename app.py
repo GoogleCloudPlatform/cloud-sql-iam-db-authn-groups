@@ -179,16 +179,13 @@ def get_iam_users(groups, creds):
     """
     # keep track of iam users using set for no duplicates
     iam_users = set()
-    # build service to call Admin SDK Directory API
-    service = build("admin", "directory_v1", credentials=creds)
     # set initial groups searched to input groups
     searched_groups = groups.copy()
     # continue while there are groups to get users from
     while groups:
         group = groups.pop(0)
-        # call the Admin SDK Directory API
-        results = service.members().list(groupKey=group).execute()
-        members = results.get("members", [])
+        # get all members of IAM group
+        members = get_group_members(group, creds)
         # check if member is a group, otherwise they are a user
         for member in members:
             if member["type"] == "GROUP":
@@ -201,6 +198,27 @@ def get_iam_users(groups, creds):
                 # add user to list of group users
                 iam_users.add(member["email"])
     return iam_users
+
+
+def get_group_members(group, creds):
+    """Get all members of an IAM group.
+
+    Given an IAM group key, get all members (groups or users) that belong to the
+    group.
+
+    Args:
+        group (str): A single IAM group identifier key (name, email, ID).
+        creds: Credentials from service account to call Admin SDK Directory API.
+
+    Returns:
+        members: List of all members (groups or users) that belong to the IAM group.
+    """
+    # build service to call Admin SDK Directory API
+    service = build("admin", "directory_v1", credentials=creds)
+    # call the Admin SDK Directory API
+    results = service.members().list(groupKey=group).execute()
+    members = results.get("members", [])
+    return members
 
 
 # initialize db connection pool
