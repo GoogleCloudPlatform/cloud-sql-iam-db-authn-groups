@@ -1,11 +1,11 @@
 # Copyright 2021 Google LLC
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     https://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,7 +16,7 @@ import os
 from quart import Quart
 import sqlalchemy
 import json
-from google.auth import compute_engine
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 app = Quart(__name__)
@@ -39,14 +39,16 @@ def load_config(filename):
         config = json.load(json_file)
         json_file.close()
 
-    sql_instances  = config['sql_instances']
+    sql_instances = config['sql_instances']
     iam_groups = config['iam_groups']
 
     # verify config params are not empty
     if sql_instances is None or sql_instances == []:
-        raise ValueError("No valid Cloud SQL instances configured, please verify your config.json.")
+        raise ValueError(
+            "No valid Cloud SQL instances configured, please verify your config.json.")
     if iam_groups is None or iam_groups == []:
-        raise ValueError("No valid IAM Groups configured, please verify your config.json.")
+        raise ValueError(
+            "No valid IAM Groups configured, please verify your config.json.")
     return sql_instances, iam_groups
 
 
@@ -147,12 +149,58 @@ def init_unix_connection_engine(db_config):
     return pool
 
 
+def get_iam_users(groups, creds):
+    """Get list of all IAM users within IAM groups.
+
+    Given a list of IAM groups, get all IAM users that are members within one or
+    more of the groups or a nested child group.
+
+    Args:
+        groups: List of IAM groups.
+        creds: Credentials from service account to call Admin SDK Directory API.
+
+    Returns:
+        iam_users: Set containing all IAM users found within IAM groups.
+    """
+    # keep track of iam users using set for no duplicates
+    iam_users = set()
+    # build service to call Admin SDK Directory API
+    service = build('admin', 'directory_v1', credentials=creds)
+    # set initial groups searched to input groups
+    searched_groups = groups.copy()
+    # continue while there are groups to get users from
+    while groups:
+        group = groups.pop(0)
+        # call the Admin SDK Directory API
+        results = service.members().list(groupKey=group).execute()
+        members = results.get('members', [])
+        # check if member is a group, otherwise they are a user
+        for member in members:
+            if member['type'] == 'GROUP':
+                if member['email'] not in searched_groups:
+                    # add current group to searched groups
+                    searched_groups.append(member['email'])
+                    # add group to queue
+                    groups.append(member['email'])
+            else:
+                # add user to list of group users
+                iam_users.add(member['email'])
+    return iam_users
+
+
 # initialize db connection pool
 db = init_connection_engine()
 
+# read in config params
+sql_instances, iam_groups = load_config('config.json')
+
 # get oauth credentials
-SCOPES = ['https://www.googleapis.com/auth/admin.directory.group']
-credentials = compute_engine.Credentials(scopes=SCOPES)
+SCOPES = ['https://www.googleapis.com/auth/admin.directory.group.member.readonly']
+SERVICE_ACCOUNT_FILE = os.environ["SERVICE_ACCOUNT_PATH"]
+credentials = service_account.Credentials.from_service_account_file(
+    filename=SERVICE_ACCOUNT_FILE,
+    scopes=SCOPES,
+    subject=os.environ["DIRECTORY_ADMIN_SUBJECT"])
 
 
 @app.route("/", methods=["GET"])
@@ -162,14 +210,3 @@ def get_time():
             "SELECT NOW()").fetchone()
         print(f"Time: {str(current_time[0])}")
     return str(current_time[0])
-
-
-@app.route("/users", methods=["GET"])
-def get_iam_users():
-    # Call the Admin SDK Directory API
-    service = build('admin', 'directory_v1', credentials=credentials)
-    results = service.members().list(groupKey='jackgroup@cloudadvocacyorg.joonix.net', maxResults=100).execute()
-    users = results.get('members', [])
-    for user in users:
-        print(f"User: {user['email']}")
-    return "Got users!"
