@@ -1,0 +1,21 @@
+name: Python Formatter
+
+# Run action on PRs to main
+on:
+  pull_request:
+    branches: [ main ]
+
+  # Allows workflow to run manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  suggest:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+      - uses: rgasper/python-black-pull-request-action@master
+        env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            LINE_LENGTH: 79
