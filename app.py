@@ -190,6 +190,7 @@ def get_iam_users(groups, creds):
             else:
                 # add user to list of group users
                 iam_users.add(member["email"])
+    print(f"List of all IAM Users: {iam_users}")
     return iam_users
 
 
@@ -235,6 +236,7 @@ def get_instance_users(instances, project, creds):
         users = get_db_users(instance, project, creds)
         for user in users:
             db_users[instance].append(user["name"])
+        print(f"DB Users for instance `{instance}`: {db_users[instance]}")
     return db_users
 
 
@@ -260,6 +262,20 @@ def get_db_users(instance, project, creds):
 
 
 def delegated_credentials(creds, scopes, admin_user=None):
+    """Update default credentials.
+
+    Based on scopes and domain delegation, update oauth2 default credentials
+    accordingly.
+
+    Args:
+        creds: Default oauth2 credentials.
+        scopes: List of scopes for the credentials to limit access.
+        admin_user: Email of admin user, required for domain delegation credentials.
+
+    Returns:
+        updated_credentials: Updated oauth2 credentials with scopes and domain
+        delegation applied.
+    """
     try:
         # if we are using service account credentials from json key file this will work
         updated_credentials = creds.with_subject(admin_user).with_scopes(scopes)
@@ -301,24 +317,38 @@ def build_error_message(var_name):
 
 
 # initialize db connection pool
-db = init_connection_engine()
+# db = init_connection_engine()
 
 # read in config params
 sql_instances, iam_groups = load_config("config.json")
 
-# get oauth credentials
-SCOPES = ["https://www.googleapis.com/auth/admin.directory.group.member.readonly"]
-SERVICE_ACCOUNT_FILE = os.environ["SERVICE_ACCOUNT_PATH"]
-credentials = service_account.Credentials.from_service_account_file(
-    filename=SERVICE_ACCOUNT_FILE,
-    scopes=SCOPES,
-    subject=os.environ["DIRECTORY_ADMIN_SUBJECT"],
-)
+# define scopes
+IAM_SCOPES = ["https://www.googleapis.com/auth/admin.directory.group.member.readonly"]
+SQL_SCOPES = ["https://www.googleapis.com/auth/sqlservice.admin"]
 
+# @app.route("/", methods=["GET"])
+# def get_time():
+#    with db.connect() as conn:
+#        current_time = conn.execute("SELECT NOW()").fetchone()
+#        print(f"Time: {str(current_time[0])}")
+#    return str(current_time[0])
 
 @app.route("/", methods=["GET"])
-def get_time():
-    with db.connect() as conn:
-        current_time = conn.execute("SELECT NOW()").fetchone()
-        print(f"Time: {str(current_time[0])}")
-    return str(current_time[0])
+def sanity_check():
+    return "App is running!"
+
+
+@app.route("/iam-users", methods=["GET"])
+def test_get_iam_users():
+    creds, project = default()
+    delegated_creds = delegated_credentials(creds, IAM_SCOPES, os.environ["ADMIN_EMAIL"])
+    iam_users = get_iam_users(iam_groups, delegated_creds)
+    return "Got all IAM Users!"
+
+
+@app.route("/db-users", methods=["GET"])
+def test_get_instance_users():
+    creds, project = default()
+    delegated_creds = delegated_credentials(creds, SQL_SCOPES)
+    db_users = get_instance_users(sql_instances, project, delegated_creds)
+    return "Got DB Users!"
