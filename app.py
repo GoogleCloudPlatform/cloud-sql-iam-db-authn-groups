@@ -50,21 +50,9 @@ def load_config(filename="config.json"):
 
     # verify config params are not empty
     if sql_instances is None or sql_instances == []:
-        raise ValueError(
-            '\nNo valid Cloud SQL instances configured, please verify your config.json.\n'
-            '\nValid configuration should look like:\n\n{\n "sql_instances" : ['
-            '"my-instance", "my-other-instance"],\n "iam_groups" : ["group@example.com"'
-            ', "othergroup@example.com"]\n}\n\nYour configuration is missing the '
-            '`sql_instances` key.'
-        )
+        raise ValueError(build_error_message("sql_instances"))
     if iam_groups is None or iam_groups == []:
-        raise ValueError(
-            '\nNo valid Cloud SQL instances configured, please verify your config.json.\n'
-            '\nValid configuration should look like:\n\n{\n "sql_instances" : ['
-            '"my-instance", "my-other-instance"],\n "iam_groups" : ["group@example.com"'
-            ', "othergroup@example.com"]\n}\n\nYour configuration is missing the '
-            '`iam_groups` key.'
-        )
+        raise ValueError(build_error_message("iam_groups"))
     return sql_instances, iam_groups
 
 
@@ -265,6 +253,27 @@ def get_db_users(instance, project, creds):
     results = service.users().list(project=project, instance=instance).execute()
     users = results.get("items", [])
     return users
+
+
+def build_error_message(var_name):
+    """Utility function for building error messages.
+
+    Function to help build error messages for missing config variables.
+
+    Args:
+        var_name: String of variable name that is missing in config.
+
+    Returns:
+        message: Constructed error message to be outputted.
+    """
+    message = (
+        f"\nNo valid {var_name} configured, please verify your config.json.\n"
+        '\nValid configuration should look like:\n\n{\n "sql_instances" : ['
+        '"my-instance", "my-other-instance"],\n "iam_groups" : ["group@example.com"'
+        ', "othergroup@example.com"]\n}\n\nYour configuration is missing the '
+        f"`{var_name}` key."
+    )
+    return message
 
 
 # initialize db connection pool
