@@ -333,6 +333,7 @@ SQL_SCOPES = ["https://www.googleapis.com/auth/sqlservice.admin"]
 #        print(f"Time: {str(current_time[0])}")
 #    return str(current_time[0])
 
+
 @app.route("/", methods=["GET"])
 def sanity_check():
     return "App is running!"
@@ -341,7 +342,9 @@ def sanity_check():
 @app.route("/iam-users", methods=["GET"])
 def test_get_iam_users():
     creds, project = default()
-    delegated_creds = delegated_credentials(creds, IAM_SCOPES, os.environ["ADMIN_EMAIL"])
+    delegated_creds = delegated_credentials(
+        creds, IAM_SCOPES, os.environ["ADMIN_EMAIL"]
+    )
     iam_users = get_iam_users(iam_groups, delegated_creds)
     return "Got all IAM Users!"
 
