@@ -16,9 +16,13 @@ import os
 from quart import Quart
 import sqlalchemy
 import json
+from google.auth import default, iam
+from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from collections import defaultdict
+
+TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
 
 app = Quart(__name__)
 
@@ -253,6 +257,26 @@ def get_db_users(instance, project, creds):
     results = service.users().list(project=project, instance=instance).execute()
     users = results.get("items", [])
     return users
+
+
+def delegated_credentials(creds, scopes, admin_user=None):
+    try:
+        # if we are using service account credentials from json key file this will work
+        updated_credentials = creds.with_subject(admin_user).with_scopes(scopes)
+    except AttributeError:
+        # this exception is raised if we are using default credentials (e.g. Cloud Run)
+        request = Request()
+        # Refresh default credentials to make sure up to date and email is populated
+        creds.refresh(request)
+        service_acccount_email = creds.service_account_email
+        signer = iam.Signer(request, creds, service_acccount_email)
+        updated_credentials = service_account.Credentials(
+            signer, service_acccount_email, TOKEN_URI, scopes=scopes, subject=admin_user
+        )
+    except Exception:
+        raise
+
+    return updated_credentials
 
 
 def build_error_message(var_name):
