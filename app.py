@@ -18,6 +18,7 @@ import sqlalchemy
 import json
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from collections import defaultdict
 
 app = Quart(__name__)
 
@@ -219,6 +220,51 @@ def get_group_members(group, creds):
     results = service.members().list(groupKey=group).execute()
     members = results.get("members", [])
     return members
+
+
+def get_instance_users(instances, project, creds):
+    """Get users that belong to each Cloud SQL instance.
+
+    Given a list of Cloud SQL instance names and a Google Cloud project, get a list
+    of database users that belong to each instance.
+
+    Args:
+        instances: List of Cloud SQL instance names.
+            (e.g., ["my-instance", "my-other-instance"])
+        project: The Google Cloud project name that the instance is a resource of.
+        creds: Credentials from service account to call Cloud SQL Admin API.
+
+    Returns:
+        db_users: A dict with the instance names mapping to their list of database users.
+    """
+    # create dict to hold database users of each instance
+    db_users = defaultdict(list)
+    for instance in instances:
+        users = get_db_users(instance, project, creds)
+        for user in users:
+            db_users[instance].append(user["name"])
+    return db_users
+
+
+def get_db_users(instance, project, creds):
+    """Get all database users of a Cloud SQL instance.
+
+    Given a database instance and a Google Cloud project, get all the database
+    users that belong to the database instance.
+
+    Args:
+        instance: A Cloud SQL instance name. (e.g. "my-instance")
+        project: The Google Cloud project name that the instance is a resource of.
+        creds: Credentials from service account to call Cloud SQL Admin API.
+
+    Returns:
+        users: List of all database users that belong to the Cloud SQL instance.
+    """
+    # build service to call SQL Admin API
+    service = build("sqladmin", "v1beta4", credentials=creds)
+    results = service.users().list(project=project, instance=instance).execute()
+    users = results.get("items", [])
+    return users
 
 
 # initialize db connection pool
