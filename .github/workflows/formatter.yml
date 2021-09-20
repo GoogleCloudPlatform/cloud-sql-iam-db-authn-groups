@@ -18,4 +18,4 @@ jobs:
       - uses: rgasper/python-black-pull-request-action@master
         env:
             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-            LINE_LENGTH: 79
+            LINE_LENGTH: 88

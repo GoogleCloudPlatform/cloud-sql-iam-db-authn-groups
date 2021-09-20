@@ -16,8 +16,18 @@ import os
 from quart import Quart
 import sqlalchemy
 import json
+from google.auth import default, iam
+from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from collections import defaultdict
+
+# URI for OAuth2 credentials
+TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
+
+# define scopes
+IAM_SCOPES = ["https://www.googleapis.com/auth/admin.directory.group.member.readonly"]
+SQL_SCOPES = ["https://www.googleapis.com/auth/sqlservice.admin"]
 
 app = Quart(__name__)
 
@@ -49,21 +59,9 @@ def load_config(filename="config.json"):
 
     # verify config params are not empty
     if sql_instances is None or sql_instances == []:
-        raise ValueError(
-            '\nNo valid Cloud SQL instances configured, please verify your config.json.\n'
-            '\nValid configuration should look like:\n\n{\n "sql_instances" : ['
-            '"my-instance", "my-other-instance"],\n "iam_groups" : ["group@example.com"'
-            ', "othergroup@example.com"]\n}\n\nYour configuration is missing the '
-            '`sql_instances` key.'
-        )
+        raise ValueError(build_error_message("sql_instances"))
     if iam_groups is None or iam_groups == []:
-        raise ValueError(
-            '\nNo valid Cloud SQL instances configured, please verify your config.json.\n'
-            '\nValid configuration should look like:\n\n{\n "sql_instances" : ['
-            '"my-instance", "my-other-instance"],\n "iam_groups" : ["group@example.com"'
-            ', "othergroup@example.com"]\n}\n\nYour configuration is missing the '
-            '`iam_groups` key.'
-        )
+        raise ValueError(build_error_message("iam_groups"))
     return sql_instances, iam_groups
 
 
@@ -221,25 +219,129 @@ def get_group_members(group, creds):
     return members
 
 
-# initialize db connection pool
-db = init_connection_engine()
+def get_instance_users(instances, project, creds):
+    """Get users that belong to each Cloud SQL instance.
+
+    Given a list of Cloud SQL instance names and a Google Cloud project, get a list
+    of database users that belong to each instance.
+
+    Args:
+        instances: List of Cloud SQL instance names.
+            (e.g., ["my-instance", "my-other-instance"])
+        project: The Google Cloud project name that the instances belongs to.
+        creds: Credentials to call Cloud SQL Admin API.
+
+    Returns:
+        db_users: A dict with the instance names mapping to their list of database users.
+    """
+    # create dict to hold database users of each instance
+    db_users = defaultdict(list)
+    for instance in instances:
+        users = get_db_users(instance, project, creds)
+        for user in users:
+            db_users[instance].append(user["name"])
+    return db_users
+
+
+def get_db_users(instance, project, creds):
+    """Get all database users of a Cloud SQL instance.
+
+    Given a database instance and a Google Cloud project, get all the database
+    users that belong to the database instance.
+
+    Args:
+        instance: A Cloud SQL instance name. (e.g. "my-instance")
+        project: The Google Cloud project name that the instance is a resource of.
+        creds: Credentials from service account to call Cloud SQL Admin API.
+
+    Returns:
+        users: List of all database users that belong to the Cloud SQL instance.
+    """
+    # build service to call SQL Admin API
+    service = build("sqladmin", "v1beta4", credentials=creds)
+    results = service.users().list(project=project, instance=instance).execute()
+    users = results.get("items", [])
+    return users
+
+
+def delegated_credentials(creds, scopes, admin_user=None):
+    """Update default credentials.
+
+    Based on scopes and domain delegation, update OAuth2 default credentials
+    accordingly.
+
+    Args:
+        creds: Default OAuth2 credentials.
+        scopes: List of scopes for the credentials to limit access.
+        admin_user: Email of admin user, required for domain delegation credentials.
+
+    Returns:
+        updated_credentials: Updated OAuth2 credentials with scopes and domain
+        delegation applied.
+    """
+    try:
+        # First try to update credentials using service account key file
+        updated_credentials = creds.with_subject(admin_user).with_scopes(scopes)
+    except AttributeError:
+        # Exception is raised if we are using default credentials (e.g. Cloud Run)
+        request = Request()
+        # Refresh default credentials to make sure up to date and email is populated
+        creds.refresh(request)
+        service_acccount_email = creds.service_account_email
+        signer = iam.Signer(request, creds, service_acccount_email)
+        updated_credentials = service_account.Credentials(
+            signer, service_acccount_email, TOKEN_URI, scopes=scopes, subject=admin_user
+        )
+    except Exception:
+        raise
+
+    return updated_credentials
+
+
+def build_error_message(var_name):
+    """Function to help build error messages for missing config variables.
+
+    Args:
+        var_name: String of variable name that is missing in config.
+
+    Returns:
+        message: Constructed error message to be outputted.
+    """
+    message = (
+        f"\nNo valid {var_name} configured, please verify your config.json.\n"
+        '\nValid configuration should look like:\n\n{\n "sql_instances" : ['
+        '"my-instance", "my-other-instance"],\n "iam_groups" : ["group@example.com"'
+        ', "othergroup@example.com"]\n}\n\nYour configuration is missing the '
+        f"`{var_name}` key."
+    )
+    return message
+
 
 # read in config params
 sql_instances, iam_groups = load_config("config.json")
 
-# get oauth credentials
-SCOPES = ["https://www.googleapis.com/auth/admin.directory.group.member.readonly"]
-SERVICE_ACCOUNT_FILE = os.environ["SERVICE_ACCOUNT_PATH"]
-credentials = service_account.Credentials.from_service_account_file(
-    filename=SERVICE_ACCOUNT_FILE,
-    scopes=SCOPES,
-    subject=os.environ["DIRECTORY_ADMIN_SUBJECT"],
-)
-
 
 @app.route("/", methods=["GET"])
-def get_time():
-    with db.connect() as conn:
-        current_time = conn.execute("SELECT NOW()").fetchone()
-        print(f"Time: {str(current_time[0])}")
-    return str(current_time[0])
+def sanity_check():
+    return "App is running!"
+
+
+@app.route("/iam-users", methods=["GET"])
+def test_get_iam_users():
+    creds, project = default()
+    delegated_creds = delegated_credentials(
+        creds, IAM_SCOPES, os.environ["ADMIN_EMAIL"]
+    )
+    iam_users = get_iam_users(iam_groups, delegated_creds)
+    print(f"List of all IAM Users: {iam_users}")
+    return "Got all IAM Users!"
+
+
+@app.route("/db-users", methods=["GET"])
+def test_get_instance_users():
+    creds, project = default()
+    delegated_creds = delegated_credentials(creds, SQL_SCOPES)
+    db_users = get_instance_users(sql_instances, project, delegated_creds)
+    for key in db_users:
+        print(f"DB Users for instance `{key}`: {db_users[key]}")
+    return "Got DB Users!"
