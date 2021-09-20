@@ -22,7 +22,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from collections import defaultdict
 
-# URI for oauth credentials
+# URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
 
 # define scopes
@@ -267,23 +267,23 @@ def get_db_users(instance, project, creds):
 def delegated_credentials(creds, scopes, admin_user=None):
     """Update default credentials.
 
-    Based on scopes and domain delegation, update oauth2 default credentials
+    Based on scopes and domain delegation, update OAuth2 default credentials
     accordingly.
 
     Args:
-        creds: Default oauth2 credentials.
+        creds: Default OAuth2 credentials.
         scopes: List of scopes for the credentials to limit access.
         admin_user: Email of admin user, required for domain delegation credentials.
 
     Returns:
-        updated_credentials: Updated oauth2 credentials with scopes and domain
+        updated_credentials: Updated OAuth2 credentials with scopes and domain
         delegation applied.
     """
     try:
-        # if we are using service account credentials from json key file this will work
+        # First try to update credentials using service account key file
         updated_credentials = creds.with_subject(admin_user).with_scopes(scopes)
     except AttributeError:
-        # this exception is raised if we are using default credentials (e.g. Cloud Run)
+        # Exception is raised if we are using default credentials (e.g. Cloud Run)
         request = Request()
         # Refresh default credentials to make sure up to date and email is populated
         creds.refresh(request)
