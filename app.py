@@ -22,7 +22,12 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from collections import defaultdict
 
+# URI for oauth credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
+
+# define scopes
+IAM_SCOPES = ["https://www.googleapis.com/auth/admin.directory.group.member.readonly"]
+SQL_SCOPES = ["https://www.googleapis.com/auth/sqlservice.admin"]
 
 app = Quart(__name__)
 
@@ -190,7 +195,6 @@ def get_iam_users(groups, creds):
             else:
                 # add user to list of group users
                 iam_users.add(member["email"])
-    print(f"List of all IAM Users: {iam_users}")
     return iam_users
 
 
@@ -224,8 +228,8 @@ def get_instance_users(instances, project, creds):
     Args:
         instances: List of Cloud SQL instance names.
             (e.g., ["my-instance", "my-other-instance"])
-        project: The Google Cloud project name that the instance is a resource of.
-        creds: Credentials from service account to call Cloud SQL Admin API.
+        project: The Google Cloud project name that the instances belongs to.
+        creds: Credentials to call Cloud SQL Admin API.
 
     Returns:
         db_users: A dict with the instance names mapping to their list of database users.
@@ -236,7 +240,6 @@ def get_instance_users(instances, project, creds):
         users = get_db_users(instance, project, creds)
         for user in users:
             db_users[instance].append(user["name"])
-        print(f"DB Users for instance `{instance}`: {db_users[instance]}")
     return db_users
 
 
@@ -296,9 +299,7 @@ def delegated_credentials(creds, scopes, admin_user=None):
 
 
 def build_error_message(var_name):
-    """Utility function for building error messages.
-
-    Function to help build error messages for missing config variables.
+    """Function to help build error messages for missing config variables.
 
     Args:
         var_name: String of variable name that is missing in config.
@@ -316,22 +317,8 @@ def build_error_message(var_name):
     return message
 
 
-# initialize db connection pool
-# db = init_connection_engine()
-
 # read in config params
 sql_instances, iam_groups = load_config("config.json")
-
-# define scopes
-IAM_SCOPES = ["https://www.googleapis.com/auth/admin.directory.group.member.readonly"]
-SQL_SCOPES = ["https://www.googleapis.com/auth/sqlservice.admin"]
-
-# @app.route("/", methods=["GET"])
-# def get_time():
-#    with db.connect() as conn:
-#        current_time = conn.execute("SELECT NOW()").fetchone()
-#        print(f"Time: {str(current_time[0])}")
-#    return str(current_time[0])
 
 
 @app.route("/", methods=["GET"])
@@ -346,6 +333,7 @@ def test_get_iam_users():
         creds, IAM_SCOPES, os.environ["ADMIN_EMAIL"]
     )
     iam_users = get_iam_users(iam_groups, delegated_creds)
+    print(f"List of all IAM Users: {iam_users}")
     return "Got all IAM Users!"
 
 
@@ -354,4 +342,6 @@ def test_get_instance_users():
     creds, project = default()
     delegated_creds = delegated_credentials(creds, SQL_SCOPES)
     db_users = get_instance_users(sql_instances, project, delegated_creds)
+    for key in db_users:
+        print(f"DB Users for instance `{key}`: {db_users[key]}")
     return "Got DB Users!"
