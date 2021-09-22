@@ -65,7 +65,7 @@ def load_config(filename="config.json"):
     return sql_instances, iam_groups
 
 
-def init_connection_engine():
+def init_connection_engine(creds):
     """Configure and initialize database connection pool.
 
     Configures the parameters for the database connection pool. Initiliazes the
@@ -79,13 +79,16 @@ def init_connection_engine():
         "pool_recycle": 1800,  # 30 minutes
     }
 
+    # get credentials to authn to DB through IAM service account
+    delegated_creds = delegated_credentials(creds, SQL_SCOPES)
+    service_account_email = delegated_creds.service_account_email.split("@")[0]
     if os.environ.get("DB_HOST"):
-        return init_tcp_connection_engine(db_config)
+        return init_tcp_connection_engine(db_config, service_account_email, delegated_creds)
     else:
-        return init_unix_connection_engine(db_config)
+        return init_unix_connection_engine(db_config, service_account_email, delegated_creds)
 
 
-def init_tcp_connection_engine(db_config):
+def init_tcp_connection_engine(db_config, service_acount_email, creds):
     """Load and initialize database connection pool via TCP connection.
 
     Loads in the parameters for the database connection pool. Initiliazes the
@@ -98,9 +101,9 @@ def init_tcp_connection_engine(db_config):
     Returns:
         A database connection pool instance.
     """
-    db_user = os.environ["DB_USER"]
-    db_pass = os.environ["DB_PASS"]
-    db_name = os.environ["DB_NAME"]
+    db_user = service_acount_email
+    db_pass = str(creds.token)
+    db_name = ""
     db_host = os.environ["DB_HOST"]
 
     # Extract host and port from db_host
@@ -123,7 +126,7 @@ def init_tcp_connection_engine(db_config):
     return pool
 
 
-def init_unix_connection_engine(db_config):
+def init_unix_connection_engine(db_config, service_account_email, creds):
     """Load and initialize database connection pool via Unix socket connection.
 
     Loads in the parameters for the database connection pool. Initiliazes
@@ -137,9 +140,10 @@ def init_unix_connection_engine(db_config):
     Returns:
         A database connection pool instance.
     """
-    db_user = os.environ["DB_USER"]
-    db_pass = os.environ["DB_PASS"]
-    db_name = os.environ["DB_NAME"]
+
+    db_user = service_account_email
+    db_pass = str(creds.token)
+    db_name = ""
     db_socket_dir = os.environ.get("DB_SOCKET_DIR", "/cloudsql")
     cloud_sql_connection_name = os.environ["CLOUD_SQL_CONNECTION_NAME"]
 
@@ -282,16 +286,21 @@ def delegated_credentials(creds, scopes, admin_user=None):
     try:
         # First try to update credentials using service account key file
         updated_credentials = creds.with_subject(admin_user).with_scopes(scopes)
+        if not updated_credentials.valid:
+            request = Request()
+            updated_credentials.refresh(request)
     except AttributeError:
         # Exception is raised if we are using default credentials (e.g. Cloud Run)
         request = Request()
-        # Refresh default credentials to make sure up to date and email is populated
         creds.refresh(request)
         service_acccount_email = creds.service_account_email
         signer = iam.Signer(request, creds, service_acccount_email)
         updated_credentials = service_account.Credentials(
             signer, service_acccount_email, TOKEN_URI, scopes=scopes, subject=admin_user
         )
+        # if not valid, refresh credentials
+        if not updated_credentials.valid:
+            updated_credentials.refresh(request)
     except Exception:
         raise
 
@@ -345,3 +354,12 @@ def test_get_instance_users():
     for key in db_users:
         print(f"DB Users for instance `{key}`: {db_users[key]}")
     return "Got DB Users!"
+
+@app.route("/db", methods=["GET"])
+def get_time():
+    creds, project = default()
+    db = init_connection_engine(creds)
+    with db.connect() as conn:
+        current_time = conn.execute("SELECT NOW()").fetchone()
+        print(f"Time: {str(current_time[0])}")
+    return str(current_time[0])
