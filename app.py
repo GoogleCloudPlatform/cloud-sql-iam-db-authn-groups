@@ -268,6 +268,32 @@ def get_db_users(instance, project, creds):
     return users
 
 
+def create_group_role(db, group):
+    """Verify or create DB role for managing DB users.
+    """
+    with db.connect() as conn:
+        conn.execute(f"CREATE ROLE IF NOT EXISTS '{group}'")
+    return
+
+
+def grant_group_role(db, role, users):
+    # format DB user list for SQL statement
+    sql_users = ", ".join(users)
+    with db.connect() as conn:
+        stmt = sqlalchemy.text(f"GRANT '{role}' TO {sql_users}")
+        conn.execute(stmt)
+    return
+
+
+def revoke_group_role(db, role, users):
+    # format DB user list for SQL statement
+    sql_users = ", ".join(users)
+    with db.connect() as conn:
+        stmt = sqlalchemy.text(f"REVOKE '{role}' FROM {sql_users}")
+        conn.execute(stmt)
+    return
+
+
 def delegated_credentials(creds, scopes, admin_user=None):
     """Update default credentials.
 
@@ -355,11 +381,30 @@ def test_get_instance_users():
         print(f"DB Users for instance `{key}`: {db_users[key]}")
     return "Got DB Users!"
 
-@app.route("/db", methods=["GET"])
-def get_time():
+
+@app.route("/create-role", methods=["GET"])
+def create_role():
     creds, project = default()
     db = init_connection_engine(creds)
-    with db.connect() as conn:
-        current_time = conn.execute("SELECT NOW()").fetchone()
-        print(f"Time: {str(current_time[0])}")
-    return str(current_time[0])
+    create_group_role(db, "mygroup")
+    return "Created Role for Group!"
+
+
+@app.route("/grant-role", methods=["GET"])
+def grant_role():
+    creds, project = default()
+    db = init_connection_engine(creds)
+    role = "mygroup"
+    users = ["jack", "test"]
+    grant_group_role(db, role, users)
+    return f"Granted {role} role to the following users: {users}"
+
+
+@app.route("/revoke-role", methods=["GET"])
+def revoke_role():
+    creds, project = default()
+    db = init_connection_engine(creds)
+    role = "mygroup"
+    users = ["jack", "test"]
+    revoke_group_role(db, role, users)
+    return f"Revoked {role} role from the following users: {users}"
