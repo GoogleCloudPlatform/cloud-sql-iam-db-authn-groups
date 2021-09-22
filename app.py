@@ -268,6 +268,17 @@ def get_db_users(instance, project, creds):
     return users
 
 
+def insert_db_user(user_email, instance, project, creds):
+    # build service to call SQL Admin API
+    service = build("sqladmin", "v1beta4", credentials=creds)
+    user = {
+        "name": user_email,
+        "type": "CLOUD_IAM_USER"
+    }
+    results = service.users().insert(project=project, instance=instance, body=user).execute()
+    return
+
+
 def create_group_role(db, group):
     """Verify or create DB role for managing DB users.
     """
