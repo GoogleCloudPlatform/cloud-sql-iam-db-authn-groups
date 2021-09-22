@@ -65,7 +65,7 @@ def load_config(filename="config.json"):
     return sql_instances, iam_groups
 
 
-def init_connection_engine(creds):
+def init_connection_engine(instance, project, creds):
     """Configure and initialize database connection pool.
 
     Configures the parameters for the database connection pool. Initiliazes the
@@ -85,7 +85,7 @@ def init_connection_engine(creds):
     if os.environ.get("DB_HOST"):
         return init_tcp_connection_engine(db_config, service_account_email, delegated_creds)
     else:
-        return init_unix_connection_engine(db_config, service_account_email, delegated_creds)
+        return init_unix_connection_engine(instance, project, db_config, service_account_email, delegated_creds)
 
 
 def init_tcp_connection_engine(db_config, service_acount_email, creds):
@@ -126,7 +126,7 @@ def init_tcp_connection_engine(db_config, service_acount_email, creds):
     return pool
 
 
-def init_unix_connection_engine(db_config, service_account_email, creds):
+def init_unix_connection_engine(instance, project, db_config, service_account_email, creds):
     """Load and initialize database connection pool via Unix socket connection.
 
     Loads in the parameters for the database connection pool. Initiliazes
@@ -145,7 +145,7 @@ def init_unix_connection_engine(db_config, service_account_email, creds):
     db_pass = str(creds.token)
     db_name = ""
     db_socket_dir = os.environ.get("DB_SOCKET_DIR", "/cloudsql")
-    cloud_sql_connection_name = os.environ["CLOUD_SQL_CONNECTION_NAME"]
+    cloud_sql_connection_name = project + ":us-east1:" + instance
 
     pool = sqlalchemy.create_engine(
         # Equivalent URL:
@@ -180,25 +180,31 @@ def get_iam_users(groups, creds):
         iam_users: Set containing all IAM users found within IAM groups.
     """
     # keep track of iam users using set for no duplicates
-    iam_users = set()
-    # set initial groups searched to input groups
-    searched_groups = groups.copy()
-    # continue while there are groups to get users from
-    while groups:
-        group = groups.pop(0)
-        # get all members of IAM group
-        members = get_group_members(group, creds)
-        # check if member is a group, otherwise they are a user
-        for member in members:
-            if member["type"] == "GROUP":
-                if member["email"] not in searched_groups:
-                    # add current group to searched groups
-                    searched_groups.append(member["email"])
-                    # add group to queue
-                    groups.append(member["email"])
-            else:
-                # add user to list of group users
-                iam_users.add(member["email"])
+    iam_users = defaultdict(list)
+    # loop through groups and get their IAM users
+    for group in groups:
+        group_queue = [group]
+        # set initial groups searched to input groups
+        searched_groups = group_queue.copy()
+        group_users = set()
+        while group_queue:
+            current_group = group_queue.pop(0)
+            # get all members of current IAM group
+            members = get_group_members(current_group, creds)
+            # check if member is a group, otherwise they are a user
+            for member in members:
+                if member["type"] == "GROUP":
+                    if member["email"] not in searched_groups:
+                        # add current group to searched groups
+                        searched_groups.append(member["email"])
+                        # add group to queue
+                        group_queue.append(member["email"])
+                else:
+                    # add user to list of group users
+                    group_users.add(member["email"])
+        
+        iam_users[group] = list(group_users)
+        
     return iam_users
 
 
@@ -289,22 +295,38 @@ def create_group_role(db, group):
 
 def grant_group_role(db, role, users):
     # format DB user list for SQL statement
-    sql_users = ", ".join(users)
     with db.connect() as conn:
-        stmt = sqlalchemy.text("GRANT ':role' TO :user")
-        for user in sql_users:
+        stmt = sqlalchemy.text("GRANT :role TO :user")
+        for user in users:
             conn.execute(stmt, role=role, user=user)
     return
 
 
 def revoke_group_role(db, role, users):
     # format DB user list for SQL statement
-    sql_users = ", ".join(users)
     with db.connect() as conn:
-        stmt = sqlalchemy.text("REVOKE ':role' FROM :user")
-        for user in sql_users:
+        stmt = sqlalchemy.text("REVOKE :role FROM :user")
+        for user in users:
             conn.execute(stmt, role=role, user=user)
     return
+
+
+def find_users_missing_role(db, users, role):
+    grant_users = []
+    with db.connect() as conn:
+        for user in users:
+            user = user.split("@")[0]
+            stmt = sqlalchemy.text("SHOW GRANTS FOR :user")
+            results = conn.execute(stmt, user=user).fetchall()
+            has_grant = False
+            for result in results:
+                result = str(result)
+                if result.find(f"`{role}`") >= 0:
+                    has_grant = True
+                    break
+            if not has_grant:
+                grant_users.append(user)
+    return grant_users
 
 
 def delegated_credentials(creds, scopes, admin_user=None):
@@ -365,6 +387,17 @@ def build_error_message(var_name):
     return message
 
 
+def missing_iam_users(iam_users, instance_users):
+    missing_db_users = defaultdict(set)
+    for group, users in iam_users.items():
+        for instance, db_users in instance_users.items():
+            missing_users = [user for user in users if user.split("@")[0] not in db_users]
+            if len(missing_users) > 0:
+                for user in missing_users:
+                    missing_db_users[instance].add(user)
+    return missing_db_users
+
+
 # read in config params
 sql_instances, iam_groups = load_config("config.json")
 
@@ -421,3 +454,49 @@ def revoke_role():
     users = ["jack", "test"]
     revoke_group_role(db, role, users)
     return f"Revoked {role} role from the following users: {users}"
+
+
+@app.route("/demo", methods=["GET"])
+def run_demo():
+    # read in config params
+    sql_instances, iam_groups = load_config("config.json")
+    # grab default creds from cloud run service account
+    creds, project = default()
+    # update default credentials with IAM SCOPE and domain delegation
+    iam_creds = delegated_credentials(
+        creds, IAM_SCOPES, "eno@enocom.io"
+    )
+    # update default credentials with Cloud SQL scopes
+    sql_creds = delegated_credentials(creds, SQL_SCOPES)
+
+    # get IAM users of each IAM group
+    iam_users = get_iam_users(iam_groups, iam_creds)
+    for key in iam_users:
+        print(f"IAM Users in Group {key}: {iam_users[key]}")
+
+    # get all instance DB users
+    instance_users = get_instance_users(sql_instances, project, sql_creds)
+    for key in instance_users:
+        print(f"DB Users in instance `{key}`: {instance_users[key]}")
+
+    # find IAM users who are missing as DB users
+    missing_users = missing_iam_users(iam_users, instance_users)
+    for instance, users in missing_users.items():
+        print(f"Missing IAM DB users for instance `{instance}`: {users}")
+        for user in users:
+            insert_db_user(user, instance, project, sql_creds)
+    
+    # for each instance add IAM group roles to manage permissions and grant roles if need be
+    for instance in sql_instances:
+        db = init_connection_engine(instance, project, sql_creds)
+
+        for group, users in iam_users.items():
+            # mysql role does not need email part
+            role = group.split("@")[0]
+            create_group_role(db, role)
+            users_missing_role = find_users_missing_role(db, users, role)
+            print(f"Users missing role `{role}` for instance `{instance}`: {users_missing_role}")
+            grant_group_role(db, role, users_missing_role)
+            print(f"Granted the following users the role `{role}` on instance `{instance}`: {users_missing_role}")
+        
+    return "IAM DB Groups Authn has run successfully!"
