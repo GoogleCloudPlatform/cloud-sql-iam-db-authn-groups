@@ -280,8 +280,9 @@ def grant_group_role(db, role, users):
     # format DB user list for SQL statement
     sql_users = ", ".join(users)
     with db.connect() as conn:
-        stmt = sqlalchemy.text(f"GRANT '{role}' TO {sql_users}")
-        conn.execute(stmt)
+        stmt = sqlalchemy.text("GRANT ':role' TO :user")
+        for user in sql_users:
+            conn.execute(stmt, role=role, user=user)
     return
 
 
@@ -289,8 +290,9 @@ def revoke_group_role(db, role, users):
     # format DB user list for SQL statement
     sql_users = ", ".join(users)
     with db.connect() as conn:
-        stmt = sqlalchemy.text(f"REVOKE '{role}' FROM {sql_users}")
-        conn.execute(stmt)
+        stmt = sqlalchemy.text("REVOKE ':role' FROM :user")
+        for user in sql_users:
+            conn.execute(stmt, role=role, user=user)
     return
 
 
