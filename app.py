@@ -532,7 +532,7 @@ def run_demo():
     # grab default creds from cloud run service account
     creds, project = default()
     # update default credentials with IAM SCOPE and domain delegation
-    iam_creds = delegated_credentials(creds, IAM_SCOPES, "eno@enocom.io")
+    iam_creds = delegated_credentials(creds, IAM_SCOPES, os.environ["ADMIN_EMAIL"])
     # update default credentials with Cloud SQL scopes
     sql_creds = delegated_credentials(creds, SQL_SCOPES)
 
