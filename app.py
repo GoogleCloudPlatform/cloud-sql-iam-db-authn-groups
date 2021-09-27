@@ -98,50 +98,9 @@ def init_connection_engine(instance_connection_name, creds):
 
     # service account email to access DB, mysql truncates usernames to before '@' sign
     service_account_email = mysql_username(creds.service_account_email)
-    if os.environ.get("DB_HOST"):
-        return init_tcp_connection_engine(db_config, service_account_email, creds)
-    else:
-        return init_unix_connection_engine(
-            instance_connection_name, db_config, service_account_email, creds
-        )
-
-
-def init_tcp_connection_engine(db_config, service_acount_email, creds):
-    """Load and initialize database connection pool via TCP connection.
-
-    Loads in the parameters for the database connection pool. Initiliazes the
-    database connection pool through TCP which is recommended route for private IP.
-
-    Args:
-        db_config: A dict mapping database config parameters to their corresponding
-            values.
-
-    Returns:
-        A database connection pool instance.
-    """
-    db_user = service_acount_email
-    db_pass = str(creds.token)
-    db_name = ""
-    db_host = os.environ["DB_HOST"]
-
-    # Extract host and port from db_host
-    host_args = db_host.split(":")
-    db_hostname, db_port = host_args[0], int(host_args[1])
-
-    pool = sqlalchemy.create_engine(
-        # Equivalent URL:
-        # mysql+pymysql://<db_user>:<db_pass>@<db_host>:<db_port>/<db_name>
-        sqlalchemy.engine.url.URL.create(
-            drivername="mysql+pymysql",
-            username=db_user,  # e.g. "my-database-user"
-            password=db_pass,  # e.g. "my-database-password"
-            host=db_hostname,  # e.g. "127.0.0.1"
-            port=db_port,  # e.g. 3306
-            database=db_name,  # e.g. "my-database-name"
-        ),
-        **db_config,
+    return init_unix_connection_engine(
+        instance_connection_name, db_config, service_account_email, creds
     )
-    return pool
 
 
 def init_unix_connection_engine(
