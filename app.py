@@ -20,7 +20,8 @@ from google.auth import default, iam
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from collections import defaultdict, namedtuple
+from collections import defaultdict
+from  typing import NamedTuple
 
 # URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
@@ -29,12 +30,20 @@ TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
 IAM_SCOPES = ["https://www.googleapis.com/auth/admin.directory.group.member.readonly"]
 SQL_SCOPES = ["https://www.googleapis.com/auth/sqlservice.admin"]
 
-# create namedtuple for easier readability and access of instance connection names
-InstanceConnectionName = namedtuple(
-    "InstanceConnectionName", ["project", "region", "instance"]
-)
-
 app = Quart(__name__)
+
+
+class InstanceConnectionName(NamedTuple):
+    """A class to manage instance connection names.
+
+    Args:
+        project (str): Project name that instance belongs to.
+        region (str): Region where instance is located.
+        instance (str): Name of instance.
+    """
+    project: str
+    region: str
+    instance: str
 
 
 def load_config(filename="config.json"):
@@ -507,13 +516,13 @@ def test_get_iam_users():
 def test_get_instance_users():
     creds, project = default()
     delegated_creds = delegated_credentials(creds, SQL_SCOPES)
-    db_users = get_instance_users(sql_instances, project, delegated_creds)
+    db_users = get_instance_users(sql_instances, delegated_creds)
     for key in db_users:
         print(f"DB Users for instance `{key}`: {db_users[key]}")
     return "Got DB Users!"
 
 
-@app.route("/demo", methods=["GET"])
+@app.route("/run", methods=["GET"])
 def run_demo():
     # grab default creds from cloud run service account
     creds, project = default()
