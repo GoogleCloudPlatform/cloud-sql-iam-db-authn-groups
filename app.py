@@ -522,7 +522,7 @@ def test_get_instance_users():
 
 
 @app.route("/run", methods=["GET"])
-def run_demo():
+def run():
     # grab default creds from cloud run service account
     creds, project = default()
     # update default credentials with IAM SCOPE and domain delegation
