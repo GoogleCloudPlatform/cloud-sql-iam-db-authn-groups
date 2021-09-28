@@ -240,9 +240,7 @@ def get_instance_users(instance_connection_names, creds):
     # create dict to hold database users of each instance
     db_users = defaultdict(list)
     for connection_name in instance_connection_names:
-        users = get_db_users(
-            InstanceConnectionName._make(connection_name.split(":")), creds
-        )
+        users = get_db_users(InstanceConnectionName(*connection_name.split(":")), creds)
         for user in users:
             db_users[connection_name].append(user["name"])
     return db_users
@@ -548,7 +546,7 @@ def run_demo():
         print(f"Missing IAM DB users for instance `{instance}`: {users}")
         for user in users:
             insert_db_user(
-                user, InstanceConnectionName._make(instance.split(":")), sql_creds
+                user, InstanceConnectionName(*instance.split(":")), sql_creds
             )
 
     # for each instance add IAM group roles to manage permissions and grant roles if need be
