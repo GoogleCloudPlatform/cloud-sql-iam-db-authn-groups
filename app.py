@@ -21,7 +21,7 @@ from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from collections import defaultdict
-from  typing import NamedTuple
+from typing import NamedTuple
 
 # URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
@@ -41,6 +41,7 @@ class InstanceConnectionName(NamedTuple):
         region (str): Region where instance is located.
         instance (str): Name of instance.
     """
+
     project: str
     region: str
     instance: str
