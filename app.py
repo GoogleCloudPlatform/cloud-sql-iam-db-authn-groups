@@ -14,7 +14,9 @@
 
 import os
 from quart import Quart
+import asyncio
 import sqlalchemy
+from sqlalchemy.ext.asyncio import create_async_engine
 import json
 from google.auth import default, iam
 from google.auth.transport.requests import Request
@@ -141,11 +143,11 @@ def init_unix_connection_engine(
     db_name = ""
     db_socket_dir = os.environ.get("DB_SOCKET_DIR", "/cloudsql")
 
-    pool = sqlalchemy.create_engine(
+    pool = create_async_engine(
         # Equivalent URL:
         # mysql+pymysql://<db_user>:<db_pass>@/<db_name>?unix_socket=<socket_path>/<cloud_sql_instance_name>
         sqlalchemy.engine.url.URL.create(
-            drivername="mysql+pymysql",
+            drivername="mysql+aiomysql",
             username=db_user,  # e.g. "my-database-user"
             password=db_pass,  # e.g. "my-database-password"
             database=db_name,  # e.g. "my-database-name"
@@ -307,7 +309,7 @@ def insert_db_user(user_email, instance_connection_name, creds):
     return
 
 
-def create_group_role(db, group):
+async def create_group_role(db, group):
     """Verify or create DB role.
 
     Given a group name, verify existance of DB role or create new DB role matching
@@ -318,11 +320,11 @@ def create_group_role(db, group):
         group: Name of group to be verified as role or created as new role.
     """
     stmt = sqlalchemy.text("CREATE ROLE IF NOT EXISTS :role")
-    db.execute(stmt, role=group)
+    await db.execute(stmt, {"role": group})
     return
 
 
-def grant_group_role(db, role, users):
+async def grant_group_role(db, role, users):
     """Grant DB group role to DB users.
 
     Given a DB group role and a list of DB users, grant the DB role to each user.
@@ -334,11 +336,11 @@ def grant_group_role(db, role, users):
     """
     stmt = sqlalchemy.text("GRANT :role TO :user")
     for user in users:
-        db.execute(stmt, role=role, user=user)
+        await db.execute(stmt, {"role": role, "user": user})
     return
 
 
-def revoke_group_role(db, role, users):
+async def revoke_group_role(db, role, users):
     """Revoke DB group role to DB users.
 
     Given a DB group role and a list of DB users, revoke the DB role from each user.
@@ -350,11 +352,11 @@ def revoke_group_role(db, role, users):
     """
     stmt = sqlalchemy.text("REVOKE :role FROM :user")
     for user in users:
-        db.execute(stmt, role=role, user=user)
+        await db.execute(stmt, {"role": role, "user": user})
     return
 
 
-def get_users_missing_role(db, role, users):
+async def get_users_missing_role(db, role, users):
     """Find DB users' missing DB role.
 
     Given a list of DB users, and a specific DB role, find all DB users that don't have the
@@ -374,7 +376,7 @@ def get_users_missing_role(db, role, users):
         user = mysql_username(user)
         # query roles granted to user
         stmt = sqlalchemy.text("SHOW GRANTS FOR :user")
-        results = db.execute(stmt, user=user).fetchall()
+        results = (await db.execute(stmt, {"user": user})).fetchall()
         has_grant = False
         # look for role among roles granted to user
         for result in results:
@@ -493,6 +495,27 @@ def mysql_username(iam_email):
     return username
 
 
+async def manage_instance_roles(instance_connection_name, iam_users, creds):
+    db = init_connection_engine(instance_connection_name, creds)
+    # create connection to db instance
+    async with db.connect() as db_connection:
+        for group, users in iam_users.items():
+            # mysql role does not need email part and can be truncated
+            role = mysql_username(group)
+            await create_group_role(db_connection, role)
+            users_missing_role = await get_users_missing_role(
+                db_connection, role, users
+            )
+            print(
+                f"Users missing role `{role}` for instance `{instance_connection_name}`: {users_missing_role}"
+            )
+            await grant_group_role(db_connection, role, users_missing_role)
+            print(
+                f"Granted the following users the role `{role}` on instance `{instance_connection_name}`: {users_missing_role}"
+            )
+    return
+
+
 # read in config params
 sql_instances, iam_groups, admin_email = load_config("config.json")
 
@@ -522,7 +545,7 @@ def test_get_instance_users():
 
 
 @app.route("/run", methods=["GET"])
-def run():
+async def run():
     # grab default creds from cloud run service account
     creds, project = default()
     # update default credentials with IAM SCOPE and domain delegation
@@ -551,20 +574,5 @@ def run():
 
     # for each instance add IAM group roles to manage permissions and grant roles if need be
     for instance in sql_instances:
-        db = init_connection_engine(instance, sql_creds)
-        # create connection to db instance
-        with db.connect() as db_connection:
-            for group, users in iam_users.items():
-                # mysql role does not need email part and can be truncated
-                role = mysql_username(group)
-                create_group_role(db_connection, role)
-                users_missing_role = get_users_missing_role(db_connection, role, users)
-                print(
-                    f"Users missing role `{role}` for instance `{instance}`: {users_missing_role}"
-                )
-                grant_group_role(db_connection, role, users_missing_role)
-                print(
-                    f"Granted the following users the role `{role}` on instance `{instance}`: {users_missing_role}"
-                )
-
+        await manage_instance_roles(instance, iam_users, sql_creds)
     return "IAM DB Groups Authn has run successfully!"
