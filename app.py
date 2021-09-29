@@ -502,6 +502,17 @@ def mysql_username(iam_email):
 
 
 async def manage_instance_roles(instance_connection_name, iam_users, creds):
+    """Function to manage database instance roles.
+
+    Manage DB roles within database instance which includes: connect to instance,
+    verify/create group roles, add roles to DB users who are missing them.
+
+    Args:
+        instance_connection_name: Instance connection name of Cloud SQL instance.
+            (e.g. "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>")
+        iam_users: Set containing all IAM users found within IAM groups.
+        creds: OAuth2 credentials with SQL scopes applied.
+    """
     db = init_connection_engine(instance_connection_name, creds)
     # create connection to db instance
     async with db.connect() as db_connection:
