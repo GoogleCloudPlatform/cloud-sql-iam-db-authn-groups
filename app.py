@@ -14,6 +14,7 @@
 
 import os
 from quart import Quart
+from quart.utils import run_sync
 import asyncio
 import sqlalchemy
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -24,6 +25,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from collections import defaultdict
 from typing import NamedTuple
+from functools import partial
 
 # URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
@@ -162,7 +164,7 @@ def init_unix_connection_engine(
     return pool
 
 
-def get_iam_users(groups, creds):
+async def get_iam_users(groups, creds):
     """Get list of all IAM users within IAM groups.
 
     Given a list of IAM groups, get all IAM users that are members within one or
@@ -186,7 +188,8 @@ def get_iam_users(groups, creds):
         while group_queue:
             current_group = group_queue.pop(0)
             # get all members of current IAM group
-            members = get_group_members(current_group, creds)
+            members_partial = partial(get_group_members, current_group, creds)
+            members = await run_sync(members_partial)()
             # check if member is a group, otherwise they are a user
             for member in members:
                 if member["type"] == "GROUP":
@@ -225,7 +228,7 @@ def get_group_members(group, creds):
     return members
 
 
-def get_instance_users(instance_connection_names, creds):
+async def get_instance_users(instance_connection_names, creds):
     """Get users that belong to each Cloud SQL instance.
 
     Given a list of Cloud SQL instance names and a Google Cloud project, get a list
@@ -242,7 +245,10 @@ def get_instance_users(instance_connection_names, creds):
     # create dict to hold database users of each instance
     db_users = defaultdict(list)
     for connection_name in instance_connection_names:
-        users = get_db_users(InstanceConnectionName(*connection_name.split(":")), creds)
+        get_users = partial(
+            get_db_users, InstanceConnectionName(*connection_name.split(":")), creds
+        )
+        users = await run_sync(get_users)()
         for user in users:
             db_users[connection_name].append(user["name"])
     return db_users
@@ -525,25 +531,6 @@ def sanity_check():
     return "App is running!"
 
 
-@app.route("/iam-users", methods=["GET"])
-def test_get_iam_users():
-    creds, project = default()
-    delegated_creds = delegated_credentials(creds, IAM_SCOPES, admin_email)
-    iam_users = get_iam_users(iam_groups, delegated_creds)
-    print(f"List of all IAM Users: {iam_users}")
-    return "Got all IAM Users!"
-
-
-@app.route("/db-users", methods=["GET"])
-def test_get_instance_users():
-    creds, project = default()
-    delegated_creds = delegated_credentials(creds, SQL_SCOPES)
-    db_users = get_instance_users(sql_instances, delegated_creds)
-    for key in db_users:
-        print(f"DB Users for instance `{key}`: {db_users[key]}")
-    return "Got DB Users!"
-
-
 @app.route("/run", methods=["GET"])
 async def run():
     # grab default creds from cloud run service account
@@ -553,13 +540,15 @@ async def run():
     # update default credentials with Cloud SQL scopes
     sql_creds = delegated_credentials(creds, SQL_SCOPES)
 
+    iam_users, instance_users = await asyncio.gather(
+        get_iam_users(iam_groups, iam_creds),
+        get_instance_users(sql_instances, sql_creds),
+    )
     # get IAM users of each IAM group
-    iam_users = get_iam_users(iam_groups, iam_creds)
     for group_name, user_list in iam_users.items():
         print(f"IAM Users in Group {group_name}: {user_list}")
 
     # get all instance DB users
-    instance_users = get_instance_users(sql_instances, sql_creds)
     for instance_name, db_users in instance_users.items():
         print(f"DB Users in instance `{instance_name}`: {db_users}")
 
@@ -573,6 +562,9 @@ async def run():
             )
 
     # for each instance add IAM group roles to manage permissions and grant roles if need be
-    for instance in sql_instances:
-        await manage_instance_roles(instance, iam_users, sql_creds)
+    instance_coros = [
+        manage_instance_roles(instance, iam_users, sql_creds)
+        for instance in sql_instances
+    ]
+    await asyncio.gather(*instance_coros)
     return "IAM DB Groups Authn has run successfully!"
