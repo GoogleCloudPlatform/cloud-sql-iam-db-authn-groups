@@ -51,6 +51,17 @@ class InstanceConnectionName(NamedTuple):
     instance: str
 
 
+class GrantFetcher:
+    def __init__(self, db):
+        self.db = db
+
+    async def fetch_user_grants(self, user):
+        # query roles granted to user
+        stmt = sqlalchemy.text("SHOW GRANTS FOR :user")
+        results = (await self.db.execute(stmt, {"user": user})).fetchall()
+        return results
+
+
 def load_config(filename="config.json"):
     """Load in params from json config file.
 
@@ -88,6 +99,27 @@ def load_config(filename="config.json"):
     if admin_email is None or admin_email == "":
         raise ValueError(build_error_message("admin_email"))
     return sql_instances, iam_groups, admin_email
+
+
+def build_error_message(var_name):
+    """Function to help build error messages for missing config variables.
+
+    Args:
+        var_name: String of variable name that is missing in config.
+
+    Returns:
+        message: Constructed error message to be outputted.
+    """
+    message = (
+        f"\nNo valid {var_name} configured, please verify your config.json.\n"
+        '\nValid configuration should look like:\n\n{\n "sql_instances" : ['
+        '"my-project:my-region:my-instance",'
+        ' "my-other-project:my-other-region:my-other-instance"],\n "iam_groups" : '
+        '["group@example.com", "othergroup@example.com"],\n "admin_email" : '
+        '"admin@example.com"\n}\n\nYour configuration is '
+        f"missing the `{var_name}` key."
+    )
+    return message
 
 
 def init_connection_engine(instance_connection_name, creds):
@@ -315,6 +347,72 @@ def insert_db_user(user_email, instance_connection_name, creds):
     return
 
 
+async def manage_instance_roles(instance_connection_name, iam_users, creds):
+    """Function to manage database instance roles.
+
+    Manage DB roles within database instance which includes: connect to instance,
+    verify/create group roles, add roles to DB users who are missing them.
+
+    Args:
+        instance_connection_name: Instance connection name of Cloud SQL instance.
+            (e.g. "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>")
+        iam_users: Set containing all IAM users found within IAM groups.
+        creds: OAuth2 credentials with SQL scopes applied.
+    """
+    db = init_connection_engine(instance_connection_name, creds)
+    # create connection to db instance
+    async with db.connect() as db_connection:
+        for group, users in iam_users.items():
+            # mysql role does not need email part and can be truncated
+            role = mysql_username(group)
+            await create_group_role(db_connection, role)
+            grant_fetcher = GrantFetcher(db_connection)
+            users_missing_role = await get_users_missing_role(
+                grant_fetcher, role, users
+            )
+            print(
+                f"Users missing role `{role}` for instance `{instance_connection_name}`: {users_missing_role}"
+            )
+            await grant_group_role(db_connection, role, users_missing_role)
+            print(
+                f"Granted the following users the role `{role}` on instance `{instance_connection_name}`: {users_missing_role}"
+            )
+    return
+
+
+async def get_users_missing_role(GrantFetcher, role, users):
+    """Find DB users' missing DB role.
+
+    Given a list of DB users, and a specific DB role, find all DB users that don't have the
+    role granted to them.
+
+    Args:
+        db: Database connection pool instance.
+        role: Name of DB role to query each user for.
+        users: List of DB users' usernames.
+
+    Returns:
+        users_missing_role: List of DB usernames for users who are missing role.
+    """
+    users_missing_role = []
+    for user in users:
+        # mysql usernames are truncated to before '@' sign
+        user = mysql_username(user)
+        # fetch granted DB roles of user
+        results = await GrantFetcher.fetch_user_grants(user)
+        has_grant = False
+        # look for role among roles granted to user
+        for result in results:
+            result = str(result)
+            if result.find(f"`{role}`") >= 0:
+                has_grant = True
+                break
+        # if user doesn't have role add them to list
+        if not has_grant:
+            users_missing_role.append(user)
+    return users_missing_role
+
+
 async def create_group_role(db, group):
     """Verify or create DB role.
 
@@ -362,50 +460,6 @@ async def revoke_group_role(db, role, users):
     return
 
 
-class GrantFetcher:
-    def __init__(self, db):
-        self.db = db
-
-    async def fetch_user_grants(self, user):
-        # query roles granted to user
-        stmt = sqlalchemy.text("SHOW GRANTS FOR :user")
-        results = (await self.db.execute(stmt, {"user": user})).fetchall()
-        return results
-
-
-async def get_users_missing_role(GrantFetcher, role, users):
-    """Find DB users' missing DB role.
-
-    Given a list of DB users, and a specific DB role, find all DB users that don't have the
-    role granted to them.
-
-    Args:
-        db: Database connection pool instance.
-        role: Name of DB role to query each user for.
-        users: List of DB users' usernames.
-
-    Returns:
-        users_missing_role: List of DB usernames for users who are missing role.
-    """
-    users_missing_role = []
-    for user in users:
-        # mysql usernames are truncated to before '@' sign
-        user = mysql_username(user)
-        # fetch granted DB roles of user
-        results = await GrantFetcher.fetch_user_grants(user)
-        has_grant = False
-        # look for role among roles granted to user
-        for result in results:
-            result = str(result)
-            if result.find(f"`{role}`") >= 0:
-                has_grant = True
-                break
-        # if user doesn't have role add them to list
-        if not has_grant:
-            users_missing_role.append(user)
-    return users_missing_role
-
-
 def delegated_credentials(creds, scopes, admin_user=None):
     """Update default credentials.
 
@@ -444,27 +498,6 @@ def delegated_credentials(creds, scopes, admin_user=None):
         raise
 
     return updated_credentials
-
-
-def build_error_message(var_name):
-    """Function to help build error messages for missing config variables.
-
-    Args:
-        var_name: String of variable name that is missing in config.
-
-    Returns:
-        message: Constructed error message to be outputted.
-    """
-    message = (
-        f"\nNo valid {var_name} configured, please verify your config.json.\n"
-        '\nValid configuration should look like:\n\n{\n "sql_instances" : ['
-        '"my-project:my-region:my-instance",'
-        ' "my-other-project:my-other-region:my-other-instance"],\n "iam_groups" : '
-        '["group@example.com", "othergroup@example.com"],\n "admin_email" : '
-        '"admin@example.com"\n}\n\nYour configuration is '
-        f"missing the `{var_name}` key."
-    )
-    return message
 
 
 def get_users_to_add(iam_users, instance_users):
@@ -509,39 +542,6 @@ def mysql_username(iam_email):
     """
     username = iam_email.split("@")[0]
     return username
-
-
-async def manage_instance_roles(instance_connection_name, iam_users, creds):
-    """Function to manage database instance roles.
-
-    Manage DB roles within database instance which includes: connect to instance,
-    verify/create group roles, add roles to DB users who are missing them.
-
-    Args:
-        instance_connection_name: Instance connection name of Cloud SQL instance.
-            (e.g. "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>")
-        iam_users: Set containing all IAM users found within IAM groups.
-        creds: OAuth2 credentials with SQL scopes applied.
-    """
-    db = init_connection_engine(instance_connection_name, creds)
-    # create connection to db instance
-    async with db.connect() as db_connection:
-        for group, users in iam_users.items():
-            # mysql role does not need email part and can be truncated
-            role = mysql_username(group)
-            await create_group_role(db_connection, role)
-            grant_fetcher = GrantFetcher(db_connection)
-            users_missing_role = await get_users_missing_role(
-                grant_fetcher, role, users
-            )
-            print(
-                f"Users missing role `{role}` for instance `{instance_connection_name}`: {users_missing_role}"
-            )
-            await grant_group_role(db_connection, role, users_missing_role)
-            print(
-                f"Granted the following users the role `{role}` on instance `{instance_connection_name}`: {users_missing_role}"
-            )
-    return
 
 
 # read in config params
