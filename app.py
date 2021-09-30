@@ -362,7 +362,18 @@ async def revoke_group_role(db, role, users):
     return
 
 
-async def get_users_missing_role(db, role, users):
+class GrantFetcher:
+    def __init__(self, db):
+        self.db = db
+
+    async def fetch_user_grants(self, user):
+        # query roles granted to user
+        stmt = sqlalchemy.text("SHOW GRANTS FOR :user")
+        results = (await self.db.execute(stmt, {"user": user})).fetchall()
+        return results
+
+
+async def get_users_missing_role(GrantFetcher, role, users):
     """Find DB users' missing DB role.
 
     Given a list of DB users, and a specific DB role, find all DB users that don't have the
@@ -380,9 +391,8 @@ async def get_users_missing_role(db, role, users):
     for user in users:
         # mysql usernames are truncated to before '@' sign
         user = mysql_username(user)
-        # query roles granted to user
-        stmt = sqlalchemy.text("SHOW GRANTS FOR :user")
-        results = (await db.execute(stmt, {"user": user})).fetchall()
+        # fetch granted DB roles of user
+        results = await GrantFetcher.fetch_user_grants(user)
         has_grant = False
         # look for role among roles granted to user
         for result in results:
@@ -520,8 +530,9 @@ async def manage_instance_roles(instance_connection_name, iam_users, creds):
             # mysql role does not need email part and can be truncated
             role = mysql_username(group)
             await create_group_role(db_connection, role)
+            grant_fetcher = GrantFetcher(db_connection)
             users_missing_role = await get_users_missing_role(
-                db_connection, role, users
+                grant_fetcher, role, users
             )
             print(
                 f"Users missing role `{role}` for instance `{instance_connection_name}`: {users_missing_role}"
