@@ -7,7 +7,8 @@ on: [push]
 workflow_dispatch:
 
 jobs:
-  suggest:
+  build:
+    name: Run Python Tests
     runs-on: ubuntu-latest
 
   steps:
@@ -24,6 +25,6 @@ jobs:
       with:
         path: "tests/requirements-test.txt"
     
-    - name: Run Python Tests
+    - name: Run pytest
       run: |
         python3 -m pytest tests/
