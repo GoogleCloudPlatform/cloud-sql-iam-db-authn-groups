@@ -6,3 +6,5 @@ README.md
 __pycache__
 .gitignore
 build-and-deploy.sh
+tests
+.github
