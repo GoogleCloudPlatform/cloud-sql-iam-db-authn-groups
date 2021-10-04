@@ -3,9 +3,6 @@ name: Tests
 # Run action on PRs to main
 on: [push]
 
-# Allows workflow to run manually from the Actions tab
-workflow_dispatch:
-
 jobs:
   build:
     name: Run Python Tests
