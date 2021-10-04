@@ -52,10 +52,25 @@ class InstanceConnectionName(NamedTuple):
 
 
 class GrantFetcher:
+    """Class for fetching a DB user's grants."""
+
     def __init__(self, db):
+        """Initialize a GrantFetcher object.
+
+        Args:
+            db: Database connection object.
+        """
         self.db = db
 
     async def fetch_user_grants(self, user):
+        """Fetch DB grants of a DB user.
+
+        Args:
+            user: Username of a DB user.
+
+        Returns:
+            results: List of grants for the DB user.
+        """
         # query roles granted to user
         stmt = sqlalchemy.text("SHOW GRANTS FOR :user")
         results = (await self.db.execute(stmt, {"user": user})).fetchall()
