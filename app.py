@@ -196,15 +196,15 @@ def init_unix_connection_engine(
     return pool
 
 
-async def get_iam_users(groups, creds):
+async def get_iam_users(GroupHelper, groups):
     """Get list of all IAM users within IAM groups.
 
     Given a list of IAM groups, get all IAM users that are members within one or
     more of the groups or a nested child group.
 
     Args:
+        GroupHelper: Instance of a GroupHelper object.
         groups: List of IAM groups. (e.g., ["group@example.com", "abc@example.com"])
-        creds: Credentials to call Admin SDK Directory API.
 
     Returns:
         iam_users: Set containing all IAM users found within IAM groups.
@@ -220,7 +220,7 @@ async def get_iam_users(groups, creds):
         while group_queue:
             current_group = group_queue.pop(0)
             # get all members of current IAM group
-            members_partial = partial(get_group_members, current_group, creds)
+            members_partial = partial(GroupHelper.get_group_members, current_group)
             members = await run_sync(members_partial)()
             # check if member is a group, otherwise they are a user
             for member in members:
@@ -230,46 +230,116 @@ async def get_iam_users(groups, creds):
                         searched_groups.append(member["email"])
                         # add group to queue
                         group_queue.append(member["email"])
-                else:
+                elif member["type"] == "USER":
                     # add user to list of group users
                     group_users.add(member["email"])
+                else:
+                    continue
 
-        iam_users[group] = list(group_users)
+        iam_users[group] = group_users
 
     return iam_users
 
 
-def get_group_members(group, creds):
-    """Get all members of an IAM group.
+class ServiceBuilder:
+    """Helper class for building googleapis service calls."""
 
-    Given an IAM group key, get all members (groups or users) that belong to the
-    group.
+    def __init__(self, creds):
+        """Initialize ServiceBuilder instance.
 
-    Args:
-        group (str): A single IAM group identifier key (name, email, ID).
-        creds: Credentials from service account to call Admin SDK Directory API.
+        Args:
+            creds: OAuth2 credentials to call googleapis services.
+        """
+        self.creds = creds
 
-    Returns:
-        members: List of all members (groups or users) that belong to the IAM group.
-    """
-    # build service to call Admin SDK Directory API
-    service = build("admin", "directory_v1", credentials=creds)
-    # call the Admin SDK Directory API
-    results = service.members().list(groupKey=group).execute()
-    members = results.get("members", [])
-    return members
+    def get_group_members(self, group):
+        """Get all members of an IAM group.
+
+        Given an IAM group, get all members (groups or users) that belong to the
+        group.
+
+        Args:
+            group (str): A single IAM group identifier key (name, email, ID).
+
+        Returns:
+            members: List of all members (groups or users) that belong to the IAM group.
+        """
+        # build service to call Admin SDK Directory API
+        service = build("admin", "directory_v1", credentials=self.creds)
+        # call the Admin SDK Directory API
+        results = service.members().list(groupKey=group).execute()
+        members = results.get("members", [])
+        print(f"Members: {members}")
+        return members
+
+    def get_db_users(self, instance_connection_name):
+        """Get all database users of a Cloud SQL instance.
+
+        Given a database instance and a Google Cloud project, get all the database
+        users that belong to the database instance.
+
+        Args:
+            instance_connection_name: InstanceConnectionName namedTuple.
+                (e.g. InstanceConnectionName(project='my-project', region='my-region',
+                instance='my-instance'))
+
+        Returns:
+            users: List of all database users that belong to the Cloud SQL instance.
+        """
+        # build service to call SQL Admin API
+        service = build("sqladmin", "v1beta4", credentials=self.creds)
+        results = (
+            service.users()
+            .list(
+                project=instance_connection_name.project,
+                instance=instance_connection_name.instance,
+            )
+            .execute()
+        )
+        users = results.get("items", [])
+        return users
+
+    def insert_db_user(self, user_email, instance_connection_name):
+        """Create DB user from IAM user.
+
+        Given an IAM user's email, insert the IAM user as a DB user for Cloud SQL instance.
+
+        Args:
+            user_email: IAM users's email address.
+            instance_connection_name: InstanceConnectionName namedTuple.
+                (e.g. InstanceConnectionName(project='my-project', region='my-region',
+                instance='my-instance'))
+        """
+        # build service to call SQL Admin API
+        service = build("sqladmin", "v1beta4", credentials=self.creds)
+        user = {"name": user_email, "type": "CLOUD_IAM_USER"}
+        try:
+            results = (
+                service.users()
+                .insert(
+                    project=instance_connection_name.project,
+                    instance=instance_connection_name.instance,
+                    body=user,
+                )
+                .execute()
+            )
+        except Exception as e:
+            print(
+                f"Could not add IAM user `{user_email}` to DB Instance `{instance_connection_name.instance}`. Error: {e}"
+            )
+        return
 
 
-async def get_instance_users(instance_connection_names, creds):
+async def get_instance_users(ServiceBuilder, instance_connection_names):
     """Get users that belong to each Cloud SQL instance.
 
     Given a list of Cloud SQL instance names and a Google Cloud project, get a list
     of database users that belong to each instance.
 
     Args:
-        instances: List of Cloud SQL instance names.
+        ServiceBuilder: A ServiceBuilder object for calling SQL admin APIs.
+        instance_connection_names: List of Cloud SQL instance connection names.
             (e.g., ["my-project:my-region:my-instance", "my-project:my-region:my-other-instance"])
-        creds: Credentials to call Cloud SQL Admin API.
 
     Returns:
         db_users: A dict with the instance names mapping to their list of database users.
@@ -278,73 +348,13 @@ async def get_instance_users(instance_connection_names, creds):
     db_users = defaultdict(list)
     for connection_name in instance_connection_names:
         get_users = partial(
-            get_db_users, InstanceConnectionName(*connection_name.split(":")), creds
+            ServiceBuilder.get_db_users,
+            InstanceConnectionName(*connection_name.split(":")),
         )
         users = await run_sync(get_users)()
         for user in users:
             db_users[connection_name].append(user["name"])
     return db_users
-
-
-def get_db_users(instance_connection_name, creds):
-    """Get all database users of a Cloud SQL instance.
-
-    Given a database instance and a Google Cloud project, get all the database
-    users that belong to the database instance.
-
-    Args:
-        instance_connection_name: InstanceConnectionName namedTuple.
-            (e.g. InstanceConnectionName(project='my-project', region='my-region',
-            instance='my-instance'))
-        creds: Credentials to call Cloud SQL Admin API.
-
-    Returns:
-        users: List of all database users that belong to the Cloud SQL instance.
-    """
-    # build service to call SQL Admin API
-    service = build("sqladmin", "v1beta4", credentials=creds)
-    results = (
-        service.users()
-        .list(
-            project=instance_connection_name.project,
-            instance=instance_connection_name.instance,
-        )
-        .execute()
-    )
-    users = results.get("items", [])
-    return users
-
-
-def insert_db_user(user_email, instance_connection_name, creds):
-    """Create DB user from IAM user.
-
-    Given an IAM user's email, insert the IAM user as a DB user for Cloud SQL instance.
-
-    Args:
-        user_email: IAM users's email address.
-        instance_connection_name: InstanceConnectionName namedTuple.
-            (e.g. InstanceConnectionName(project='my-project', region='my-region',
-            instance='my-instance'))
-        creds: Credentials to call Cloud SQL Admin API.
-    """
-    # build service to call SQL Admin API
-    service = build("sqladmin", "v1beta4", credentials=creds)
-    user = {"name": user_email, "type": "CLOUD_IAM_USER"}
-    try:
-        results = (
-            service.users()
-            .insert(
-                project=instance_connection_name.project,
-                instance=instance_connection_name.instance,
-                body=user,
-            )
-            .execute()
-        )
-    except Exception as e:
-        print(
-            f"Could not add IAM user `{user_email}` to DB Instance `{instance_connection_name.instance}`. Error: {e}"
-        )
-    return
 
 
 async def manage_instance_roles(instance_connection_name, iam_users, creds):
@@ -562,9 +572,13 @@ async def run():
     # update default credentials with Cloud SQL scopes
     sql_creds = delegated_credentials(creds, SQL_SCOPES)
 
+    # create ServiceBuilder objects for API calls
+    iam_service = ServiceBuilder(iam_creds)
+    sql_service = ServiceBuilder(sql_creds)
+
     iam_users, instance_users = await asyncio.gather(
-        get_iam_users(iam_groups, iam_creds),
-        get_instance_users(sql_instances, sql_creds),
+        get_iam_users(iam_service, iam_groups),
+        get_instance_users(sql_service, sql_instances),
     )
     # get IAM users of each IAM group
     for group_name, user_list in iam_users.items():
@@ -579,7 +593,7 @@ async def run():
     for instance, users in users_to_add.items():
         print(f"Missing IAM DB users for instance `{instance}`: {users}")
         for user in users:
-            insert_db_user(
+            sql_service.insert_db_user(
                 user, InstanceConnectionName(*instance.split(":")), sql_creds
             )
 
