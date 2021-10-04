@@ -16,9 +16,9 @@ import pytest
 from app import get_users_missing_role
 
 # fake fetcher class using duck typing
-class FakeFetcher():
-    """Fake GrantFetcher class for testing.
-    """
+class FakeFetcher:
+    """Fake GrantFetcher class for testing."""
+
     def __init__(self, results):
         """Initalizes a FakeFetcher.
 
@@ -28,7 +28,7 @@ class FakeFetcher():
         self.results = results
 
     async def fetch_user_grants(self, user):
-        """ Fake fetch_user_grants for testing.
+        """Fake fetch_user_grants for testing.
 
         Args:
             user: DB username to get list of grants for.
@@ -38,30 +38,44 @@ class FakeFetcher():
         """
         return self.results[user]
 
+
 @pytest.mark.asyncio
 async def test_single_user_missing_role():
-    """Test for single user missing required role.
-    """
+    """Test for single user missing required role."""
     data = {
-        "jack" : [('GRANT USAGE ON *.* TO `jack`@`%`'), ('GRANT `mygroup`@`%`,`test-group`@`%` TO `jack`@`%`')],
-        "test" : [('GRANT USAGE ON *.* TO `test`@`%`')]
+        "jack": [
+            ("GRANT USAGE ON *.* TO `jack`@`%`"),
+            ("GRANT `mygroup`@`%`,`test-group`@`%` TO `jack`@`%`"),
+        ],
+        "test": [("GRANT USAGE ON *.* TO `test`@`%`")],
     }
     fetcher = FakeFetcher(data)
-    results = await get_users_missing_role(fetcher, 'mygroup', ["jack@test.com", "test@test.com"])
-    assert results == ['test']
+    results = await get_users_missing_role(
+        fetcher, "mygroup", ["jack@test.com", "test@test.com"]
+    )
+    assert results == ["test"]
+
 
 @pytest.mark.asyncio
 async def test_multiple_users_missing_roles():
-    """Test for multiple users missing required role.
-    """
+    """Test for multiple users missing required role."""
     data = {
-        "jack" : [('GRANT USAGE ON *.* TO `jack`@`%`'), ('GRANT `group`@`%`,`test-group`@`%` TO `jack`@`%`')],
-        "test" : [('GRANT USAGE ON *.* TO `test`@`%`'), ('GRANT `group`@`%`,`test-group`@`%` TO `test`@`%`')],
-        "user1" : [('GRANT `test-group` TO `user1`@`')]
+        "jack": [
+            ("GRANT USAGE ON *.* TO `jack`@`%`"),
+            ("GRANT `group`@`%`,`test-group`@`%` TO `jack`@`%`"),
+        ],
+        "test": [
+            ("GRANT USAGE ON *.* TO `test`@`%`"),
+            ("GRANT `group`@`%`,`test-group`@`%` TO `test`@`%`"),
+        ],
+        "user1": [("GRANT `test-group` TO `user1`@`")],
     }
     fetcher = FakeFetcher(data)
-    results = await get_users_missing_role(fetcher, 'mygroup', ["jack@test.com", "test@test.com", "user1@test.com"])
-    assert results == ['jack', 'test', 'user1']
+    results = await get_users_missing_role(
+        fetcher, "mygroup", ["jack@test.com", "test@test.com", "user1@test.com"]
+    )
+    assert results == ["jack", "test", "user1"]
+
 
 @pytest.mark.asyncio
 async def test_no_missing_roles():
@@ -70,13 +84,22 @@ async def test_no_missing_roles():
     Should return empty list.
     """
     data = {
-        "jack" : [('GRANT USAGE ON *.* TO `jack`@`%`'), ('GRANT `mygroup`@`%`,`test-group`@`%` TO `jack`@`%`')],
-        "test" : [('GRANT USAGE ON *.* TO `test`@`%`'), ('GRANT `mygroup`@`%`,`test-group`@`%` TO `test`@`%`')],
-        "user1" : [('GRANT `test-group` TO `user1`@`')]
+        "jack": [
+            ("GRANT USAGE ON *.* TO `jack`@`%`"),
+            ("GRANT `mygroup`@`%`,`test-group`@`%` TO `jack`@`%`"),
+        ],
+        "test": [
+            ("GRANT USAGE ON *.* TO `test`@`%`"),
+            ("GRANT `mygroup`@`%`,`test-group`@`%` TO `test`@`%`"),
+        ],
+        "user1": [("GRANT `test-group` TO `user1`@`")],
     }
     fetcher = FakeFetcher(data)
-    results = await get_users_missing_role(fetcher, 'test-group', ["jack@test.com", "test@test.com", "user1@test.com"])
+    results = await get_users_missing_role(
+        fetcher, "test-group", ["jack@test.com", "test@test.com", "user1@test.com"]
+    )
     assert results == []
+
 
 @pytest.mark.asyncio
 async def test_role_name_within_other_role_name():
@@ -85,14 +108,25 @@ async def test_role_name_within_other_role_name():
     Should return only single proper missing role for each user.
     """
     data = {
-        "jack" : [('GRANT USAGE ON *.* TO `jack`@`%`'), ('GRANT `mygroup`@`%`,`test-group`@`%` TO `jack`@`%`')],
-        "test" : [('GRANT USAGE ON *.* TO `test`@`%`'), ('GRANT `mygroup2`@`%`,`test-group`@`%` TO `test`@`%`')]
+        "jack": [
+            ("GRANT USAGE ON *.* TO `jack`@`%`"),
+            ("GRANT `mygroup`@`%`,`test-group`@`%` TO `jack`@`%`"),
+        ],
+        "test": [
+            ("GRANT USAGE ON *.* TO `test`@`%`"),
+            ("GRANT `mygroup2`@`%`,`test-group`@`%` TO `test`@`%`"),
+        ],
     }
     fetcher = FakeFetcher(data)
-    results = await get_users_missing_role(fetcher, 'mygroup', ["jack@test.com", "test@test.com"])
-    assert results == ['test']
-    results = await get_users_missing_role(fetcher, 'mygroup2', ["jack@test.com", "test@test.com"])
-    assert results == ['jack']
+    results = await get_users_missing_role(
+        fetcher, "mygroup", ["jack@test.com", "test@test.com"]
+    )
+    assert results == ["test"]
+    results = await get_users_missing_role(
+        fetcher, "mygroup2", ["jack@test.com", "test@test.com"]
+    )
+    assert results == ["jack"]
+
 
 @pytest.mark.asyncio
 async def test_empty_users():
@@ -101,9 +135,15 @@ async def test_empty_users():
     Should return empty list.
     """
     data = {
-        "jack" : [('GRANT USAGE ON *.* TO `jack`@`%`'), ('GRANT `mygroup`@`%`,`test-group`@`%` TO `jack`@`%`')],
-        "test" : [('GRANT USAGE ON *.* TO `test`@`%`'), ('GRANT `mygroup`@`%`,`test-group`@`%` TO `test`@`%`')]
+        "jack": [
+            ("GRANT USAGE ON *.* TO `jack`@`%`"),
+            ("GRANT `mygroup`@`%`,`test-group`@`%` TO `jack`@`%`"),
+        ],
+        "test": [
+            ("GRANT USAGE ON *.* TO `test`@`%`"),
+            ("GRANT `mygroup`@`%`,`test-group`@`%` TO `test`@`%`"),
+        ],
     }
     fetcher = FakeFetcher(data)
-    results = await get_users_missing_role(fetcher, 'mygroup', [])
+    results = await get_users_missing_role(fetcher, "mygroup", [])
     assert results == []
