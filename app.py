@@ -554,10 +554,6 @@ def mysql_username(iam_email):
     return username
 
 
-# read in config params
-sql_instances, iam_groups, admin_email = load_config("config.json")
-
-
 @app.route("/", methods=["GET"])
 def sanity_check():
     return "App is running!"
@@ -565,6 +561,8 @@ def sanity_check():
 
 @app.route("/run", methods=["GET"])
 async def run():
+    # read in config params
+    sql_instances, iam_groups, admin_email = load_config("config.json")
     # grab default creds from cloud run service account
     creds, project = default()
     # update default credentials with IAM SCOPE and domain delegation
