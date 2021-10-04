@@ -1,8 +1,8 @@
-name: Tests
+name: Run Tests
 
 # Run action on PRs to main
 on:
-  pull-request:
+  pull_request:
     branches: [ main ]
 
 jobs:
