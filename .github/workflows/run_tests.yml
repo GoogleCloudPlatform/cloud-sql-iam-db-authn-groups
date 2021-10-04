@@ -1,0 +1,29 @@
+name: Tests
+
+# Run action on PRs to main
+on: [push]
+
+# Allows workflow to run manually from the Actions tab
+workflow_dispatch:
+
+jobs:
+  suggest:
+    runs-on: ubuntu-latest
+
+  steps:
+    # check out repository
+    - uses: actions/checkout@v2
+
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.9
+    
+    - name: Install Test Dependencies
+      uses: py-actions/py-dependency-install@v2
+      with:
+        path: "tests/requirements-test.txt"
+    
+    - name: Run Python Tests
+      run: |
+        python3 -m pytest tests/
