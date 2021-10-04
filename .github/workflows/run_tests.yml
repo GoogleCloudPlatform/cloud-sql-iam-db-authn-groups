@@ -1,7 +1,9 @@
 name: Tests
 
 # Run action on PRs to main
-on: [push]
+on:
+  pull-request:
+    branches: [ main ]
 
 jobs:
   build:
