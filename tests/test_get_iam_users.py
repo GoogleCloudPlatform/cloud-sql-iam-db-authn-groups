@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from google.auth import iam
 import pytest
 from app import get_iam_users
 
@@ -19,13 +20,13 @@ from app import get_iam_users
 class FakeServiceBuilder:
     """Fake ServiceBuilder class for testing."""
 
-    def __init__(self, group_members):
+    def __init__(self, members):
         """Initializes a FakeServiceBuilder.
 
         Args:
             group_members: Dict with group name as key and list of group's members as values.
         """
-        self.members = group_members
+        self.members = members
 
     def get_group_members(self, group):
         """Fake get_group_members for testing.
@@ -58,11 +59,13 @@ data = {
 }
 
 # fake helper for most tests
-fake_service = FakeServiceBuilder(data)
+@pytest.fixture
+def fake_service():
+    return FakeServiceBuilder(data)
 
 
 @pytest.mark.asyncio
-async def test_single_group():
+async def test_single_group(fake_service):
     """Test for single IAM group."""
     iam_users = await get_iam_users(fake_service, groups=["test-group@test.com"])
     assert iam_users == {
@@ -71,7 +74,7 @@ async def test_single_group():
 
 
 @pytest.mark.asyncio
-async def test_multiple_groups():
+async def test_multiple_groups(fake_service):
     """Test for multiple IAM groups."""
     iam_users = await get_iam_users(
         fake_service, groups=["test-group@test.com", "test-group2@abc.com"]
@@ -83,7 +86,7 @@ async def test_multiple_groups():
 
 
 @pytest.mark.asyncio
-async def test_group_within_group():
+async def test_group_within_group(fake_service):
     """Test for one group, where the group has a nested group within.
 
     Should return the users of both the main group and the nested group as members of the main group.
@@ -95,25 +98,24 @@ async def test_group_within_group():
 
 
 @pytest.mark.asyncio
-async def test_empty_group():
+async def test_empty_group(fake_service):
     """Test for group with no users.
 
-    Should return empty list.
+    Should return empty dict as it will skip group with no users.
     """
     iam_users = await get_iam_users(fake_service, groups=["empty-group@test.com"])
-    assert iam_users == {"empty-group@test.com": set()}
+    assert iam_users == {}
 
 
 @pytest.mark.asyncio
-async def test_group_loop():
+async def test_group_loop(fake_service):
     """Test group that has infinite loop of nested groups.
 
     Should return members of the main group and nested group without duplications.
     """
     new_group = {"type": "GROUP", "email": "test-group3@xyz.com"}
-    data["test-group2@abc.com"].append(new_group)
-    fake_service2 = FakeServiceBuilder(data)
-    iam_users = await get_iam_users(fake_service2, groups=["test-group3@xyz.com"])
+    fake_service.members["test-group2@abc.com"].append(new_group)
+    iam_users = await get_iam_users(fake_service, groups=["test-group3@xyz.com"])
     assert iam_users == {
         "test-group3@xyz.com": set(("test@test.com", "jack@test.com", "jane@xyz.com"))
     }

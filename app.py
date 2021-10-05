@@ -23,6 +23,7 @@ from google.auth import default, iam
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from collections import defaultdict
 from typing import NamedTuple
 from functools import partial
@@ -250,8 +251,9 @@ async def get_iam_users(GroupHelper, groups):
                     group_users.add(member["email"])
                 else:
                     continue
-
-        iam_users[group] = group_users
+        # only add to dict if group has members, allows skipping of not valid groups
+        if group_users:
+            iam_users[group] = group_users
 
     return iam_users
 
@@ -281,10 +283,16 @@ class ServiceBuilder:
         """
         # build service to call Admin SDK Directory API
         service = build("admin", "directory_v1", credentials=self.creds)
-        # call the Admin SDK Directory API
-        results = service.members().list(groupKey=group).execute()
-        members = results.get("members", [])
-        return members
+
+        try:
+            # call the Admin SDK Directory API
+            results = service.members().list(groupKey=group).execute()
+            members = results.get("members", [])
+            return members
+        # handle errors if IAM group does not exist etc.
+        except HttpError as e:
+            print(f"Could not get IAM group `{group}`. Error: {e}")
+            return []
 
     def get_db_users(self, instance_connection_name):
         """Get all database users of a Cloud SQL instance.
