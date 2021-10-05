@@ -606,7 +606,7 @@ async def run():
         print(f"Missing IAM DB users for instance `{instance}`: {users}")
         for user in users:
             sql_service.insert_db_user(
-                user, InstanceConnectionName(*instance.split(":")), sql_creds
+                user, InstanceConnectionName(*instance.split(":"))
             )
 
     # for each instance add IAM group roles to manage permissions and grant roles if need be
