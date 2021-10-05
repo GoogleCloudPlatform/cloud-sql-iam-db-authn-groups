@@ -284,7 +284,6 @@ class ServiceBuilder:
         # call the Admin SDK Directory API
         results = service.members().list(groupKey=group).execute()
         members = results.get("members", [])
-        print(f"Members: {members}")
         return members
 
     def get_db_users(self, instance_connection_name):
