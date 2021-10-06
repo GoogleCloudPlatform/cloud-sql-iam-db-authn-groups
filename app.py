@@ -212,14 +212,14 @@ def init_unix_connection_engine(
     return pool
 
 
-async def get_iam_users(GroupHelper, groups):
+async def get_iam_users(user_service, groups):
     """Get list of all IAM users within IAM groups.
 
     Given a list of IAM groups, get all IAM users that are members within one or
     more of the groups or a nested child group.
 
     Args:
-        GroupHelper: Instance of a GroupHelper object.
+        user_service: Instance of a UserService object.
         groups: List of IAM groups. (e.g., ["group@example.com", "abc@example.com"])
 
     Returns:
@@ -236,7 +236,7 @@ async def get_iam_users(GroupHelper, groups):
         while group_queue:
             current_group = group_queue.pop(0)
             # get all members of current IAM group
-            members_partial = partial(GroupHelper.get_group_members, current_group)
+            members_partial = partial(user_service.get_group_members, current_group)
             members = await run_sync(members_partial)()
             # check if member is a group, otherwise they are a user
             for member in members:
@@ -258,16 +258,18 @@ async def get_iam_users(GroupHelper, groups):
     return iam_users
 
 
-class ServiceBuilder:
+class UserService:
     """Helper class for building googleapis service calls."""
 
-    def __init__(self, creds):
-        """Initialize ServiceBuilder instance.
+    def __init__(self, sql_creds, iam_creds):
+        """Initialize UserService instance.
 
         Args:
-            creds: OAuth2 credentials to call googleapis services.
+            sql_creds: OAuth2 credentials to call Cloud SQL Admin APIs.
+            iam_creds: OAuth2 credentials to call Directory Admin APIs
         """
-        self.creds = creds
+        self.sql_creds = sql_creds
+        self.iam_creds = iam_creds
 
     def get_group_members(self, group):
         """Get all members of an IAM group.
@@ -282,7 +284,7 @@ class ServiceBuilder:
             members: List of all members (groups or users) that belong to the IAM group.
         """
         # build service to call Admin SDK Directory API
-        service = build("admin", "directory_v1", credentials=self.creds)
+        service = build("admin", "directory_v1", credentials=self.iam_creds)
 
         try:
             # call the Admin SDK Directory API
@@ -309,7 +311,7 @@ class ServiceBuilder:
             users: List of all database users that belong to the Cloud SQL instance.
         """
         # build service to call SQL Admin API
-        service = build("sqladmin", "v1beta4", credentials=self.creds)
+        service = build("sqladmin", "v1beta4", credentials=self.sql_creds)
         results = (
             service.users()
             .list(
@@ -333,7 +335,7 @@ class ServiceBuilder:
                 instance='my-instance'))
         """
         # build service to call SQL Admin API
-        service = build("sqladmin", "v1beta4", credentials=self.creds)
+        service = build("sqladmin", "v1beta4", credentials=self.sql_creds)
         user = {"name": user_email, "type": "CLOUD_IAM_USER"}
         try:
             results = (
@@ -352,14 +354,14 @@ class ServiceBuilder:
         return
 
 
-async def get_instance_users(ServiceBuilder, instance_connection_names):
+async def get_instance_users(user_service, instance_connection_names):
     """Get users that belong to each Cloud SQL instance.
 
     Given a list of Cloud SQL instance names and a Google Cloud project, get a list
     of database users that belong to each instance.
 
     Args:
-        ServiceBuilder: A ServiceBuilder object for calling SQL admin APIs.
+        user_service: A UserService object for calling SQL admin APIs.
         instance_connection_names: List of Cloud SQL instance connection names.
             (e.g., ["my-project:my-region:my-instance", "my-project:my-region:my-other-instance"])
 
@@ -370,7 +372,7 @@ async def get_instance_users(ServiceBuilder, instance_connection_names):
     db_users = defaultdict(list)
     for connection_name in instance_connection_names:
         get_users = partial(
-            ServiceBuilder.get_db_users,
+            user_service.get_db_users,
             InstanceConnectionName(*connection_name.split(":")),
         )
         users = await run_sync(get_users)()
@@ -412,14 +414,14 @@ async def manage_instance_roles(instance_connection_name, iam_users, creds):
     return
 
 
-async def get_users_missing_role(GrantFetcher, role, users):
+async def get_users_missing_role(grant_fetcher, role, users):
     """Find DB users' missing DB role.
 
     Given a list of DB users, and a specific DB role, find all DB users that don't have the
     role granted to them.
 
     Args:
-        db: Database connection pool instance.
+        grant_fetcher: A GrantFetcher class object.
         role: Name of DB role to query each user for.
         users: List of DB users' usernames.
 
@@ -431,7 +433,7 @@ async def get_users_missing_role(GrantFetcher, role, users):
         # mysql usernames are truncated to before '@' sign
         user = mysql_username(user)
         # fetch granted DB roles of user
-        results = await GrantFetcher.fetch_user_grants(user)
+        results = await grant_fetcher.fetch_user_grants(user)
         has_grant = False
         # look for role among roles granted to user
         for result in results:
@@ -473,7 +475,6 @@ async def grant_group_role(db, role, users):
     stmt = sqlalchemy.text("GRANT :role TO :user")
     for user in users:
         await db.execute(stmt, {"role": role, "user": user})
-    return
 
 
 async def revoke_group_role(db, role, users):
@@ -489,7 +490,6 @@ async def revoke_group_role(db, role, users):
     stmt = sqlalchemy.text("REVOKE :role FROM :user")
     for user in users:
         await db.execute(stmt, {"role": role, "user": user})
-    return
 
 
 def delegated_credentials(creds, scopes, admin_user=None):
@@ -592,13 +592,12 @@ async def run():
     # update default credentials with Cloud SQL scopes
     sql_creds = delegated_credentials(creds, SQL_SCOPES)
 
-    # create ServiceBuilder objects for API calls
-    iam_service = ServiceBuilder(iam_creds)
-    sql_service = ServiceBuilder(sql_creds)
+    # create UserService object for API calls
+    user_service = UserService(sql_creds, iam_creds)
 
     iam_users, instance_users = await asyncio.gather(
-        get_iam_users(iam_service, iam_groups),
-        get_instance_users(sql_service, sql_instances),
+        get_iam_users(user_service, iam_groups),
+        get_instance_users(user_service, sql_instances),
     )
     # get IAM users of each IAM group
     for group_name, user_list in iam_users.items():
@@ -613,14 +612,14 @@ async def run():
     for instance, users in users_to_add.items():
         print(f"Missing IAM DB users for instance `{instance}`: {users}")
         for user in users:
-            sql_service.insert_db_user(
+            user_service.insert_db_user(
                 user, InstanceConnectionName(*instance.split(":"))
             )
 
     # for each instance add IAM group roles to manage permissions and grant roles if need be
-    instance_coros = [
+    instance_coroutines = [
         manage_instance_roles(instance, iam_users, sql_creds)
         for instance in sql_instances
     ]
-    await asyncio.gather(*instance_coros)
+    await asyncio.gather(*instance_coroutines)
     return "IAM DB Groups Authn has run successfully!"
