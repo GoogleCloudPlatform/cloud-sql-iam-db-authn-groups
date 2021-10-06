@@ -1,0 +1,29 @@
+name: Run Tests
+
+# Run action on PRs to main
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Run Python Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      # check out repository
+      - uses: actions/checkout@v2
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+      
+      - name: Install Test Dependencies
+        uses: py-actions/py-dependency-install@v2
+        with:
+          path: "tests/requirements-test.txt"
+      
+      - name: Run pytest
+        run: |
+          python3 -m pytest tests/

@@ -14,14 +14,19 @@
 
 import os
 from quart import Quart
+from quart.utils import run_sync
+import asyncio
 import sqlalchemy
+from sqlalchemy.ext.asyncio import create_async_engine
 import json
 from google.auth import default, iam
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from collections import defaultdict
 from typing import NamedTuple
+from functools import partial
 
 # URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
@@ -45,6 +50,32 @@ class InstanceConnectionName(NamedTuple):
     project: str
     region: str
     instance: str
+
+
+class GrantFetcher:
+    """Class for fetching a DB user's grants."""
+
+    def __init__(self, db):
+        """Initialize a GrantFetcher object.
+
+        Args:
+            db: Database connection object.
+        """
+        self.db = db
+
+    async def fetch_user_grants(self, user):
+        """Fetch DB grants of a DB user.
+
+        Args:
+            user: Username of a DB user.
+
+        Returns:
+            results: List of grants for the DB user.
+        """
+        # query roles granted to user
+        stmt = sqlalchemy.text("SHOW GRANTS FOR :user")
+        results = (await self.db.execute(stmt, {"user": user})).fetchall()
+        return results
 
 
 def load_config(filename="config.json"):
@@ -84,6 +115,27 @@ def load_config(filename="config.json"):
     if admin_email is None or admin_email == "":
         raise ValueError(build_error_message("admin_email"))
     return sql_instances, iam_groups, admin_email
+
+
+def build_error_message(var_name):
+    """Function to help build error messages for missing config variables.
+
+    Args:
+        var_name: String of variable name that is missing in config.
+
+    Returns:
+        message: Constructed error message to be outputted.
+    """
+    message = (
+        f"\nNo valid {var_name} configured, please verify your config.json.\n"
+        '\nValid configuration should look like:\n\n{\n "sql_instances" : ['
+        '"my-project:my-region:my-instance",'
+        ' "my-other-project:my-other-region:my-other-instance"],\n "iam_groups" : '
+        '["group@example.com", "othergroup@example.com"],\n "admin_email" : '
+        '"admin@example.com"\n}\n\nYour configuration is '
+        f"missing the `{var_name}` key."
+    )
+    return message
 
 
 def init_connection_engine(instance_connection_name, creds):
@@ -141,11 +193,11 @@ def init_unix_connection_engine(
     db_name = ""
     db_socket_dir = os.environ.get("DB_SOCKET_DIR", "/cloudsql")
 
-    pool = sqlalchemy.create_engine(
+    pool = create_async_engine(
         # Equivalent URL:
         # mysql+pymysql://<db_user>:<db_pass>@/<db_name>?unix_socket=<socket_path>/<cloud_sql_instance_name>
         sqlalchemy.engine.url.URL.create(
-            drivername="mysql+pymysql",
+            drivername="mysql+aiomysql",
             username=db_user,  # e.g. "my-database-user"
             password=db_pass,  # e.g. "my-database-password"
             database=db_name,  # e.g. "my-database-name"
@@ -160,15 +212,15 @@ def init_unix_connection_engine(
     return pool
 
 
-def get_iam_users(groups, creds):
+async def get_iam_users(user_service, groups):
     """Get list of all IAM users within IAM groups.
 
     Given a list of IAM groups, get all IAM users that are members within one or
     more of the groups or a nested child group.
 
     Args:
+        user_service: Instance of a UserService object.
         groups: List of IAM groups. (e.g., ["group@example.com", "abc@example.com"])
-        creds: Credentials to call Admin SDK Directory API.
 
     Returns:
         iam_users: Set containing all IAM users found within IAM groups.
@@ -184,7 +236,8 @@ def get_iam_users(groups, creds):
         while group_queue:
             current_group = group_queue.pop(0)
             # get all members of current IAM group
-            members = get_group_members(current_group, creds)
+            members_partial = partial(user_service.get_group_members, current_group)
+            members = await run_sync(members_partial)()
             # check if member is a group, otherwise they are a user
             for member in members:
                 if member["type"] == "GROUP":
@@ -193,46 +246,124 @@ def get_iam_users(groups, creds):
                         searched_groups.append(member["email"])
                         # add group to queue
                         group_queue.append(member["email"])
-                else:
+                elif member["type"] == "USER":
                     # add user to list of group users
                     group_users.add(member["email"])
-
-        iam_users[group] = list(group_users)
+                else:
+                    continue
+        # only add to dict if group has members, allows skipping of not valid groups
+        if group_users:
+            iam_users[group] = group_users
 
     return iam_users
 
 
-def get_group_members(group, creds):
-    """Get all members of an IAM group.
+class UserService:
+    """Helper class for building googleapis service calls."""
 
-    Given an IAM group key, get all members (groups or users) that belong to the
-    group.
+    def __init__(self, sql_creds, iam_creds):
+        """Initialize UserService instance.
 
-    Args:
-        group (str): A single IAM group identifier key (name, email, ID).
-        creds: Credentials from service account to call Admin SDK Directory API.
+        Args:
+            sql_creds: OAuth2 credentials to call Cloud SQL Admin APIs.
+            iam_creds: OAuth2 credentials to call Directory Admin APIs
+        """
+        self.sql_creds = sql_creds
+        self.iam_creds = iam_creds
 
-    Returns:
-        members: List of all members (groups or users) that belong to the IAM group.
-    """
-    # build service to call Admin SDK Directory API
-    service = build("admin", "directory_v1", credentials=creds)
-    # call the Admin SDK Directory API
-    results = service.members().list(groupKey=group).execute()
-    members = results.get("members", [])
-    return members
+    def get_group_members(self, group):
+        """Get all members of an IAM group.
+
+        Given an IAM group, get all members (groups or users) that belong to the
+        group.
+
+        Args:
+            group (str): A single IAM group identifier key (name, email, ID).
+
+        Returns:
+            members: List of all members (groups or users) that belong to the IAM group.
+        """
+        # build service to call Admin SDK Directory API
+        service = build("admin", "directory_v1", credentials=self.iam_creds)
+
+        try:
+            # call the Admin SDK Directory API
+            results = service.members().list(groupKey=group).execute()
+            members = results.get("members", [])
+            return members
+        # handle errors if IAM group does not exist etc.
+        except HttpError as e:
+            print(f"Could not get IAM group `{group}`. Error: {e}")
+            return []
+
+    def get_db_users(self, instance_connection_name):
+        """Get all database users of a Cloud SQL instance.
+
+        Given a database instance and a Google Cloud project, get all the database
+        users that belong to the database instance.
+
+        Args:
+            instance_connection_name: InstanceConnectionName namedTuple.
+                (e.g. InstanceConnectionName(project='my-project', region='my-region',
+                instance='my-instance'))
+
+        Returns:
+            users: List of all database users that belong to the Cloud SQL instance.
+        """
+        # build service to call SQL Admin API
+        service = build("sqladmin", "v1beta4", credentials=self.sql_creds)
+        results = (
+            service.users()
+            .list(
+                project=instance_connection_name.project,
+                instance=instance_connection_name.instance,
+            )
+            .execute()
+        )
+        users = results.get("items", [])
+        return users
+
+    def insert_db_user(self, user_email, instance_connection_name):
+        """Create DB user from IAM user.
+
+        Given an IAM user's email, insert the IAM user as a DB user for Cloud SQL instance.
+
+        Args:
+            user_email: IAM users's email address.
+            instance_connection_name: InstanceConnectionName namedTuple.
+                (e.g. InstanceConnectionName(project='my-project', region='my-region',
+                instance='my-instance'))
+        """
+        # build service to call SQL Admin API
+        service = build("sqladmin", "v1beta4", credentials=self.sql_creds)
+        user = {"name": user_email, "type": "CLOUD_IAM_USER"}
+        try:
+            results = (
+                service.users()
+                .insert(
+                    project=instance_connection_name.project,
+                    instance=instance_connection_name.instance,
+                    body=user,
+                )
+                .execute()
+            )
+        except Exception as e:
+            print(
+                f"Could not add IAM user `{user_email}` to DB Instance `{instance_connection_name.instance}`. Error: {e}"
+            )
+        return
 
 
-def get_instance_users(instance_connection_names, creds):
+async def get_instance_users(user_service, instance_connection_names):
     """Get users that belong to each Cloud SQL instance.
 
     Given a list of Cloud SQL instance names and a Google Cloud project, get a list
     of database users that belong to each instance.
 
     Args:
-        instances: List of Cloud SQL instance names.
+        user_service: A UserService object for calling SQL admin APIs.
+        instance_connection_names: List of Cloud SQL instance connection names.
             (e.g., ["my-project:my-region:my-instance", "my-project:my-region:my-other-instance"])
-        creds: Credentials to call Cloud SQL Admin API.
 
     Returns:
         db_users: A dict with the instance names mapping to their list of database users.
@@ -240,128 +371,57 @@ def get_instance_users(instance_connection_names, creds):
     # create dict to hold database users of each instance
     db_users = defaultdict(list)
     for connection_name in instance_connection_names:
-        users = get_db_users(InstanceConnectionName(*connection_name.split(":")), creds)
+        get_users = partial(
+            user_service.get_db_users,
+            InstanceConnectionName(*connection_name.split(":")),
+        )
+        users = await run_sync(get_users)()
         for user in users:
             db_users[connection_name].append(user["name"])
     return db_users
 
 
-def get_db_users(instance_connection_name, creds):
-    """Get all database users of a Cloud SQL instance.
+async def manage_instance_roles(instance_connection_name, iam_users, creds):
+    """Function to manage database instance roles.
 
-    Given a database instance and a Google Cloud project, get all the database
-    users that belong to the database instance.
-
-    Args:
-        instance_connection_name: InstanceConnectionName namedTuple.
-            (e.g. InstanceConnectionName(project='my-project', region='my-region',
-            instance='my-instance'))
-        creds: Credentials to call Cloud SQL Admin API.
-
-    Returns:
-        users: List of all database users that belong to the Cloud SQL instance.
-    """
-    # build service to call SQL Admin API
-    service = build("sqladmin", "v1beta4", credentials=creds)
-    results = (
-        service.users()
-        .list(
-            project=instance_connection_name.project,
-            instance=instance_connection_name.instance,
-        )
-        .execute()
-    )
-    users = results.get("items", [])
-    return users
-
-
-def insert_db_user(user_email, instance_connection_name, creds):
-    """Create DB user from IAM user.
-
-    Given an IAM user's email, insert the IAM user as a DB user for Cloud SQL instance.
+    Manage DB roles within database instance which includes: connect to instance,
+    verify/create group roles, add roles to DB users who are missing them.
 
     Args:
-        user_email: IAM users's email address.
-        instance_connection_name: InstanceConnectionName namedTuple.
-            (e.g. InstanceConnectionName(project='my-project', region='my-region',
-            instance='my-instance'))
-        creds: Credentials to call Cloud SQL Admin API.
+        instance_connection_name: Instance connection name of Cloud SQL instance.
+            (e.g. "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>")
+        iam_users: Set containing all IAM users found within IAM groups.
+        creds: OAuth2 credentials with SQL scopes applied.
     """
-    # build service to call SQL Admin API
-    service = build("sqladmin", "v1beta4", credentials=creds)
-    user = {"name": user_email, "type": "CLOUD_IAM_USER"}
-    try:
-        results = (
-            service.users()
-            .insert(
-                project=instance_connection_name.project,
-                instance=instance_connection_name.instance,
-                body=user,
+    db = init_connection_engine(instance_connection_name, creds)
+    # create connection to db instance
+    async with db.connect() as db_connection:
+        for group, users in iam_users.items():
+            # mysql role does not need email part and can be truncated
+            role = mysql_username(group)
+            await create_group_role(db_connection, role)
+            grant_fetcher = GrantFetcher(db_connection)
+            users_missing_role = await get_users_missing_role(
+                grant_fetcher, role, users
             )
-            .execute()
-        )
-    except Exception as e:
-        print(
-            f"Could not add IAM user `{user_email}` to DB Instance `{instance_connection_name.instance}`. Error: {e}"
-        )
+            print(
+                f"Users missing role `{role}` for instance `{instance_connection_name}`: {users_missing_role}"
+            )
+            await grant_group_role(db_connection, role, users_missing_role)
+            print(
+                f"Granted the following users the role `{role}` on instance `{instance_connection_name}`: {users_missing_role}"
+            )
     return
 
 
-def create_group_role(db, group):
-    """Verify or create DB role.
-
-    Given a group name, verify existance of DB role or create new DB role matching
-    name of group to manage DB users.
-
-    Args:
-        db: Database connection pool instance.
-        group: Name of group to be verified as role or created as new role.
-    """
-    stmt = sqlalchemy.text("CREATE ROLE IF NOT EXISTS :role")
-    db.execute(stmt, role=group)
-    return
-
-
-def grant_group_role(db, role, users):
-    """Grant DB group role to DB users.
-
-    Given a DB group role and a list of DB users, grant the DB role to each user.
-
-    Args:
-        db: Database connection pool instance.
-        role: Name of DB role to grant to users.
-        users: List of DB users' usernames.
-    """
-    stmt = sqlalchemy.text("GRANT :role TO :user")
-    for user in users:
-        db.execute(stmt, role=role, user=user)
-    return
-
-
-def revoke_group_role(db, role, users):
-    """Revoke DB group role to DB users.
-
-    Given a DB group role and a list of DB users, revoke the DB role from each user.
-
-    Args:
-        db: Database connection pool instance.
-        role: Name of DB role to revoke from users.
-        users: List of DB users' usernames.
-    """
-    stmt = sqlalchemy.text("REVOKE :role FROM :user")
-    for user in users:
-        db.execute(stmt, role=role, user=user)
-    return
-
-
-def get_users_missing_role(db, role, users):
+async def get_users_missing_role(grant_fetcher, role, users):
     """Find DB users' missing DB role.
 
     Given a list of DB users, and a specific DB role, find all DB users that don't have the
     role granted to them.
 
     Args:
-        db: Database connection pool instance.
+        grant_fetcher: A GrantFetcher class object.
         role: Name of DB role to query each user for.
         users: List of DB users' usernames.
 
@@ -372,9 +432,8 @@ def get_users_missing_role(db, role, users):
     for user in users:
         # mysql usernames are truncated to before '@' sign
         user = mysql_username(user)
-        # query roles granted to user
-        stmt = sqlalchemy.text("SHOW GRANTS FOR :user")
-        results = db.execute(stmt, user=user).fetchall()
+        # fetch granted DB roles of user
+        results = await grant_fetcher.fetch_user_grants(user)
         has_grant = False
         # look for role among roles granted to user
         for result in results:
@@ -386,6 +445,51 @@ def get_users_missing_role(db, role, users):
         if not has_grant:
             users_missing_role.append(user)
     return users_missing_role
+
+
+async def create_group_role(db, group):
+    """Verify or create DB role.
+
+    Given a group name, verify existance of DB role or create new DB role matching
+    name of group to manage DB users.
+
+    Args:
+        db: Database connection pool instance.
+        group: Name of group to be verified as role or created as new role.
+    """
+    stmt = sqlalchemy.text("CREATE ROLE IF NOT EXISTS :role")
+    await db.execute(stmt, {"role": group})
+    return
+
+
+async def grant_group_role(db, role, users):
+    """Grant DB group role to DB users.
+
+    Given a DB group role and a list of DB users, grant the DB role to each user.
+
+    Args:
+        db: Database connection pool instance.
+        role: Name of DB role to grant to users.
+        users: List of DB users' usernames.
+    """
+    stmt = sqlalchemy.text("GRANT :role TO :user")
+    for user in users:
+        await db.execute(stmt, {"role": role, "user": user})
+
+
+async def revoke_group_role(db, role, users):
+    """Revoke DB group role to DB users.
+
+    Given a DB group role and a list of DB users, revoke the DB role from each user.
+
+    Args:
+        db: Database connection pool instance.
+        role: Name of DB role to revoke from users.
+        users: List of DB users' usernames.
+    """
+    stmt = sqlalchemy.text("REVOKE :role FROM :user")
+    for user in users:
+        await db.execute(stmt, {"role": role, "user": user})
 
 
 def delegated_credentials(creds, scopes, admin_user=None):
@@ -426,27 +530,6 @@ def delegated_credentials(creds, scopes, admin_user=None):
         raise
 
     return updated_credentials
-
-
-def build_error_message(var_name):
-    """Function to help build error messages for missing config variables.
-
-    Args:
-        var_name: String of variable name that is missing in config.
-
-    Returns:
-        message: Constructed error message to be outputted.
-    """
-    message = (
-        f"\nNo valid {var_name} configured, please verify your config.json.\n"
-        '\nValid configuration should look like:\n\n{\n "sql_instances" : ['
-        '"my-project:my-region:my-instance",'
-        ' "my-other-project:my-other-region:my-other-instance"],\n "iam_groups" : '
-        '["group@example.com", "othergroup@example.com"],\n "admin_email" : '
-        '"admin@example.com"\n}\n\nYour configuration is '
-        f"missing the `{var_name}` key."
-    )
-    return message
 
 
 def get_users_to_add(iam_users, instance_users):
@@ -493,36 +576,15 @@ def mysql_username(iam_email):
     return username
 
 
-# read in config params
-sql_instances, iam_groups, admin_email = load_config("config.json")
-
-
 @app.route("/", methods=["GET"])
 def sanity_check():
     return "App is running!"
 
 
-@app.route("/iam-users", methods=["GET"])
-def test_get_iam_users():
-    creds, project = default()
-    delegated_creds = delegated_credentials(creds, IAM_SCOPES, admin_email)
-    iam_users = get_iam_users(iam_groups, delegated_creds)
-    print(f"List of all IAM Users: {iam_users}")
-    return "Got all IAM Users!"
-
-
-@app.route("/db-users", methods=["GET"])
-def test_get_instance_users():
-    creds, project = default()
-    delegated_creds = delegated_credentials(creds, SQL_SCOPES)
-    db_users = get_instance_users(sql_instances, delegated_creds)
-    for key in db_users:
-        print(f"DB Users for instance `{key}`: {db_users[key]}")
-    return "Got DB Users!"
-
-
 @app.route("/run", methods=["GET"])
-def run():
+async def run():
+    # read in config params
+    sql_instances, iam_groups, admin_email = load_config("config.json")
     # grab default creds from cloud run service account
     creds, project = default()
     # update default credentials with IAM SCOPE and domain delegation
@@ -530,13 +592,18 @@ def run():
     # update default credentials with Cloud SQL scopes
     sql_creds = delegated_credentials(creds, SQL_SCOPES)
 
+    # create UserService object for API calls
+    user_service = UserService(sql_creds, iam_creds)
+
+    iam_users, instance_users = await asyncio.gather(
+        get_iam_users(user_service, iam_groups),
+        get_instance_users(user_service, sql_instances),
+    )
     # get IAM users of each IAM group
-    iam_users = get_iam_users(iam_groups, iam_creds)
     for group_name, user_list in iam_users.items():
         print(f"IAM Users in Group {group_name}: {user_list}")
 
     # get all instance DB users
-    instance_users = get_instance_users(sql_instances, sql_creds)
     for instance_name, db_users in instance_users.items():
         print(f"DB Users in instance `{instance_name}`: {db_users}")
 
@@ -545,26 +612,14 @@ def run():
     for instance, users in users_to_add.items():
         print(f"Missing IAM DB users for instance `{instance}`: {users}")
         for user in users:
-            insert_db_user(
-                user, InstanceConnectionName(*instance.split(":")), sql_creds
+            user_service.insert_db_user(
+                user, InstanceConnectionName(*instance.split(":"))
             )
 
     # for each instance add IAM group roles to manage permissions and grant roles if need be
-    for instance in sql_instances:
-        db = init_connection_engine(instance, sql_creds)
-        # create connection to db instance
-        with db.connect() as db_connection:
-            for group, users in iam_users.items():
-                # mysql role does not need email part and can be truncated
-                role = mysql_username(group)
-                create_group_role(db_connection, role)
-                users_missing_role = get_users_missing_role(db_connection, role, users)
-                print(
-                    f"Users missing role `{role}` for instance `{instance}`: {users_missing_role}"
-                )
-                grant_group_role(db_connection, role, users_missing_role)
-                print(
-                    f"Granted the following users the role `{role}` on instance `{instance}`: {users_missing_role}"
-                )
-
+    instance_coroutines = [
+        manage_instance_roles(instance, iam_users, sql_creds)
+        for instance in sql_instances
+    ]
+    await asyncio.gather(*instance_coroutines)
     return "IAM DB Groups Authn has run successfully!"
