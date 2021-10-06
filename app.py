@@ -76,6 +76,18 @@ class GrantFetcher:
         stmt = sqlalchemy.text("SHOW GRANTS FOR :user")
         results = (await self.db.execute(stmt, {"user": user})).fetchall()
         return results
+        
+    
+    async def make_query(self, query):
+        """Make generic query to DB instance.
+
+        Returns:
+            results: List of results for given query.
+        """
+        # query role_edges table
+        stmt = sqlalchemy.text(query)
+        results = (await self.db.execute(stmt)).fetchall()
+        return results
 
 
 def load_config(filename="config.json"):
@@ -396,11 +408,14 @@ async def manage_instance_roles(instance_connection_name, iam_users, creds):
     db = init_connection_engine(instance_connection_name, creds)
     # create connection to db instance
     async with db.connect() as db_connection:
+        grant_fetcher = GrantFetcher(db_connection)
+        users_with_roles = await get_users_with_roles(grant_fetcher, iam_users.keys())
         for group, users in iam_users.items():
             # mysql role does not need email part and can be truncated
             role = mysql_username(group)
+            # truncate mysql_usernames
+            mysql_usernames = [mysql_username(user) for user in users]
             await create_group_role(db_connection, role)
-            grant_fetcher = GrantFetcher(db_connection)
             users_missing_role = await get_users_missing_role(
                 grant_fetcher, role, users
             )
@@ -410,6 +425,16 @@ async def manage_instance_roles(instance_connection_name, iam_users, creds):
             await grant_group_role(db_connection, role, users_missing_role)
             print(
                 f"Granted the following users the role `{role}` on instance `{instance_connection_name}`: {users_missing_role}"
+            )
+            # get list of users who have group role but are not in IAM group
+            users_to_revoke = [
+                user_with_role
+                for user_with_role in users_with_roles[role]
+                if user_with_role not in mysql_usernames
+            ]
+            await revoke_group_role(db_connection, role, users_to_revoke)
+            print(
+                f"Revoked the following users the role `{role}` on instance `{instance_connection_name}`: {users_to_revoke}"
             )
     return
 
@@ -445,6 +470,33 @@ async def get_users_missing_role(grant_fetcher, role, users):
         if not has_grant:
             users_missing_role.append(user)
     return users_missing_role
+
+
+async def get_users_with_roles(grant_fetcher, group_names):
+    """Get mapping of group role grants on DB users.
+
+    Args:
+        grant_fetcher: A GrantFetcher class instance.
+        group_names: List of all IAM group names.
+
+    Returns: Dict mapping group role to all users who have the role granted to them.
+    """
+    group_names = [mysql_username(group_name) for group_name in group_names]
+    query = "".join(
+        [
+            "SELECT FROM_USER, TO_USER FROM mysql.role_edges WHERE FROM_USER='",
+            "' OR FROM_USER='".join(group_names),
+            "'",
+        ]
+    )
+    grants = await grant_fetcher.make_query(query)
+    role_grants = defaultdict(list)
+    # loop through grants that are in tuple form (FROM_USER, TO_USER)
+    for grant in grants:
+        # filter into dict for easier access later
+        role, user = grant
+        role_grants[role].append(user)
+    return role_grants
 
 
 async def create_group_role(db, group):
