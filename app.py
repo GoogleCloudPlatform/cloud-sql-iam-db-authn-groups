@@ -76,8 +76,7 @@ class GrantFetcher:
         stmt = sqlalchemy.text("SHOW GRANTS FOR :user")
         results = (await self.db.execute(stmt, {"user": user})).fetchall()
         return results
-        
-    
+
     async def make_query(self, query):
         """Make generic query to DB instance.
 
