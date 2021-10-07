@@ -28,15 +28,15 @@ class FakeFetcher:
         """
         self.results = results
 
-    async def make_query(self, query):
+    async def fetch_role_grants(self, group_name):
         """Fake make_query for testing"""
-        return self.results
+        return self.results[group_name]
 
 
 @pytest.mark.asyncio
 async def test_single_group_role():
     "Test with single group role for happy path when multiples users are granted group role."
-    data = [("group", "user"), ("group", "user2"), ("group", "user3")]
+    data = {"group": [("group", "user"), ("group", "user2"), ("group", "user3")]}
     fake_fetcher = FakeFetcher(data)
     users_with_roles = await get_users_with_roles(fake_fetcher, ["group@test.com"])
     assert users_with_roles == {"group": ["user", "user2", "user3"]}
@@ -45,12 +45,10 @@ async def test_single_group_role():
 @pytest.mark.asyncio
 async def test_multiple_group_roles():
     "Test with multiple group roles for happy path when multiples users are granted group role."
-    data = [
-        ("group", "user"),
-        ("group", "user2"),
-        ("group2", "user3"),
-        ("group2", "user4"),
-    ]
+    data = {
+        "group": [("group", "user"), ("group", "user2")],
+        "group2": [("group2", "user3"), ("group2", "user4")],
+    }
     fake_fetcher = FakeFetcher(data)
     users_with_roles = await get_users_with_roles(
         fake_fetcher, ["group@test.com", "group2@test.com"]
@@ -66,7 +64,7 @@ async def test_no_users_with_roles():
     """Test with no users that have group roles granted to them.
 
     Should return empty defaultdict of type list"""
-    data = []
+    data = defaultdict(list)
     fake_fetcher = FakeFetcher(data)
     users_with_roles = await get_users_with_roles(fake_fetcher, ["group@test.com"])
     assert users_with_roles == defaultdict(list)
@@ -77,12 +75,11 @@ async def test_no_users_for_one_role():
     """Test multiple group roles where one role has no users with the grant.
 
     Should return only the roles with users that have grants"""
-    data = [
-        ("group", "user"),
-        ("group", "user2"),
-        ("group2", "user3"),
-        ("group2", "user4"),
-    ]
+    data = {
+        "group": [("group", "user"), ("group", "user2")],
+        "group2": [("group2", "user3"), ("group2", "user4")],
+        "group3": [],
+    }
     fake_fetcher = FakeFetcher(data)
     users_with_roles = await get_users_with_roles(
         fake_fetcher, ["group@test.com", "group2@test.com", "group3@test.com"]

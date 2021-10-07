@@ -77,15 +77,20 @@ class GrantFetcher:
         results = (await self.db.execute(stmt, {"user": user})).fetchall()
         return results
 
-    async def make_query(self, query):
-        """Make generic query to DB instance.
+    async def fetch_role_grants(self, group_name):
+        """Fetch mappings of group roles granted to DB users.
+
+        Args:
+            group_name: IAM group name prefix of email that is used as group role.
 
         Returns:
             results: List of results for given query.
         """
         # query role_edges table
-        stmt = sqlalchemy.text(query)
-        results = (await self.db.execute(stmt)).fetchall()
+        stmt = sqlalchemy.text(
+            "SELECT FROM_USER, TO_USER FROM mysql.role_edges WHERE FROM_USER= :group_name"
+        )
+        results = (await self.db.execute(stmt, {"group_name": group_name})).fetchall()
         return results
 
 
@@ -480,21 +485,15 @@ async def get_users_with_roles(grant_fetcher, group_names):
 
     Returns: Dict mapping group role to all users who have the role granted to them.
     """
-    group_names = [mysql_username(group_name) for group_name in group_names]
-    query = "".join(
-        [
-            "SELECT FROM_USER, TO_USER FROM mysql.role_edges WHERE FROM_USER='",
-            "' OR FROM_USER='".join(group_names),
-            "'",
-        ]
-    )
-    grants = await grant_fetcher.make_query(query)
     role_grants = defaultdict(list)
-    # loop through grants that are in tuple form (FROM_USER, TO_USER)
-    for grant in grants:
-        # filter into dict for easier access later
-        role, user = grant
-        role_grants[role].append(user)
+    for group_name in group_names:
+        group_name = mysql_username(group_name)
+        grants = await grant_fetcher.fetch_role_grants(group_name)
+        # loop through grants that are in tuple form (FROM_USER, TO_USER)
+        for grant in grants:
+            # filter into dict for easier access later
+            role, user = grant
+            role_grants[role].append(user)
     return role_grants
 
 
