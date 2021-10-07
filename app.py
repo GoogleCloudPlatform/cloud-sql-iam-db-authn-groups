@@ -98,7 +98,7 @@ def load_config(filename="config.json"):
 
     Returns:
         instance_to_groups_mapping: Dict with Cloud SQL instance connection names as keys and
-            list of IAM groups to manage DB users of for that instance.
+            list of IAM groups to manage DB users of as values.
         admin_email: Email of user with proper admin privileges for Google Workspace, needed
             for calling Directory API to fetch IAM users within IAM groups.
     """
