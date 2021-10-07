@@ -86,8 +86,10 @@ def load_config(filename="config.json"):
 
     Example config file:
     {
-        "sql_instances" : ["my-project:my-region:my-instance", "my-other-project:my-other-region:my-other-instance"],
-        "iam_groups" : ["group@example.com", "othergroup@example.com"],
+        "instance_to_groups_mapping" : {
+            "my-project:my-region:my-instance" : ["group@example.com", "othergroup@example.com"],
+            "my-other-project:my-other-region:my-other-instance" : ["group@example.com"]
+        },
         "admin_email" : "admin@example.com"
     }
 
@@ -95,26 +97,23 @@ def load_config(filename="config.json"):
         filename: The name of the configurable json file.
 
     Returns:
-        sql_instances: List of all Cloud SQL instances to configure.
-        iam_groups: List of all IAM Groups to manage DB users of.
+        instance_to_groups_mapping: Dict with Cloud SQL instance connection names as keys and
+            list of IAM groups to manage DB users of for that instance.
         admin_email: Email of user with proper admin privileges for Google Workspace, needed
             for calling Directory API to fetch IAM users within IAM groups.
     """
     with open(filename) as json_file:
         config = json.load(json_file)
 
-    sql_instances = config["sql_instances"]
-    iam_groups = config["iam_groups"]
+    instance_to_groups_mapping = config["instance_to_groups_mapping"]
     admin_email = config["admin_email"]
 
     # verify config params are not empty
-    if sql_instances is None or sql_instances == []:
-        raise ValueError(build_error_message("sql_instances"))
-    if iam_groups is None or iam_groups == []:
-        raise ValueError(build_error_message("iam_groups"))
+    if instance_to_groups_mapping is None or instance_to_groups_mapping == {}:
+        raise ValueError(build_error_message("instance_to_groups_mapping"))
     if admin_email is None or admin_email == "":
         raise ValueError(build_error_message("admin_email"))
-    return sql_instances, iam_groups, admin_email
+    return instance_to_groups_mapping, admin_email
 
 
 def build_error_message(var_name):
@@ -127,12 +126,11 @@ def build_error_message(var_name):
         message: Constructed error message to be outputted.
     """
     message = (
-        f"\nNo valid {var_name} configured, please verify your config.json.\n"
-        '\nValid configuration should look like:\n\n{\n "sql_instances" : ['
-        '"my-project:my-region:my-instance",'
-        ' "my-other-project:my-other-region:my-other-instance"],\n "iam_groups" : '
-        '["group@example.com", "othergroup@example.com"],\n "admin_email" : '
-        '"admin@example.com"\n}\n\nYour configuration is '
+        f"\nNo valid `{var_name}` configured, please verify your config.json.\n"
+        '\nValid configuration should look like:\n\n{\n  "instance_to_groups_mapping" : {\n    '
+        '"my-project:my-region:my-instance" : ["group@example.com", "othergroup@example.com"],'
+        '\n    "my-other-project:my-other-region:my-other-instance" : ["group@example.com"]'
+        '\n  }\n  "admin_email" : "admin@example.com"\n}\n\nYour configuration is '
         f"missing the `{var_name}` key."
     )
     return message
@@ -381,7 +379,7 @@ async def get_instance_users(user_service, instance_connection_names):
     return db_users
 
 
-async def manage_instance_roles(instance_connection_name, iam_users, creds):
+async def manage_instance_roles(instance_connection_name, iam_groups, iam_users, creds):
     """Function to manage database instance roles.
 
     Manage DB roles within database instance which includes: connect to instance,
@@ -390,13 +388,16 @@ async def manage_instance_roles(instance_connection_name, iam_users, creds):
     Args:
         instance_connection_name: Instance connection name of Cloud SQL instance.
             (e.g. "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>")
+        iam_groups: List of IAM group names that need to have group roles on instance.
         iam_users: Set containing all IAM users found within IAM groups.
         creds: OAuth2 credentials with SQL scopes applied.
     """
     db = init_connection_engine(instance_connection_name, creds)
     # create connection to db instance
     async with db.connect() as db_connection:
-        for group, users in iam_users.items():
+        for group in iam_groups:
+            # users that are members of IAM group
+            users = iam_users[group]
             # mysql role does not need email part and can be truncated
             role = mysql_username(group)
             await create_group_role(db_connection, role)
@@ -532,7 +533,7 @@ def delegated_credentials(creds, scopes, admin_user=None):
     return updated_credentials
 
 
-def get_users_to_add(iam_users, instance_users):
+def get_users_to_add(instance_to_groups_mapping, iam_users, instance_users):
     """Find IAM users who are missing as DB users.
 
     Given a dict mapping IAM groups to their IAM users, and a dict mapping Cloud SQL
@@ -549,14 +550,15 @@ def get_users_to_add(iam_users, instance_users):
             needing to be inserted into instance.
     """
     missing_db_users = defaultdict(set)
-    for group, users in iam_users.items():
-        for instance, db_users in instance_users.items():
+    for instance, iam_groups in instance_to_groups_mapping.items():
+        db_users = instance_users[instance]
+        for iam_group in iam_groups:
+            users = iam_users[iam_group]
             missing_users = [
                 user for user in users if mysql_username(user) not in db_users
             ]
-            if len(missing_users) > 0:
-                for user in missing_users:
-                    missing_db_users[instance].add(user)
+            for user in missing_users:
+                missing_db_users[instance].add(user)
     return missing_db_users
 
 
@@ -584,7 +586,7 @@ def sanity_check():
 @app.route("/run", methods=["GET"])
 async def run():
     # read in config params
-    sql_instances, iam_groups, admin_email = load_config("config.json")
+    instance_to_groups_mapping, admin_email = load_config("config.json")
     # grab default creds from cloud run service account
     creds, project = default()
     # update default credentials with IAM SCOPE and domain delegation
@@ -594,6 +596,13 @@ async def run():
 
     # create UserService object for API calls
     user_service = UserService(sql_creds, iam_creds)
+
+    # get list of sql_instance names and set of all iam group names
+    iam_groups = set()
+    for iam_group_names in instance_to_groups_mapping.values():
+        iam_groups = iam_groups.union(set(iam_group_names))
+
+    sql_instances = list(instance_to_groups_mapping.keys())
 
     iam_users, instance_users = await asyncio.gather(
         get_iam_users(user_service, iam_groups),
@@ -608,7 +617,9 @@ async def run():
         print(f"DB Users in instance `{instance_name}`: {db_users}")
 
     # find IAM users who are missing as DB users
-    users_to_add = get_users_to_add(iam_users, instance_users)
+    users_to_add = get_users_to_add(
+        instance_to_groups_mapping, iam_users, instance_users
+    )
     for instance, users in users_to_add.items():
         print(f"Missing IAM DB users for instance `{instance}`: {users}")
         for user in users:
@@ -618,7 +629,9 @@ async def run():
 
     # for each instance add IAM group roles to manage permissions and grant roles if need be
     instance_coroutines = [
-        manage_instance_roles(instance, iam_users, sql_creds)
+        manage_instance_roles(
+            instance, instance_to_groups_mapping[instance], iam_users, sql_creds
+        )
         for instance in sql_instances
     ]
     await asyncio.gather(*instance_coroutines)

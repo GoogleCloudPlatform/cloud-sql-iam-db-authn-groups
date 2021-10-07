@@ -1,5 +1,4 @@
 {
-    "sql_instances" : [],
-    "iam_groups" : [],
+    "instance_to_groups_mapping" : {},
     "admin_email" : ""
 }
