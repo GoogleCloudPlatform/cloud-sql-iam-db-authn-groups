@@ -52,11 +52,11 @@ class InstanceConnectionName(NamedTuple):
     instance: str
 
 
-class GrantFetcher:
-    """Class for fetching a DB user's grants."""
+class RoleService:
+    """Class for managing a DB user's role grants."""
 
     def __init__(self, db):
-        """Initialize a GrantFetcher object.
+        """Initialize a RoleService object.
 
         Args:
             db: Database connection object.
@@ -412,17 +412,15 @@ async def manage_instance_roles(instance_connection_name, iam_users, creds):
     db = init_connection_engine(instance_connection_name, creds)
     # create connection to db instance
     async with db.connect() as db_connection:
-        grant_fetcher = GrantFetcher(db_connection)
-        users_with_roles = await get_users_with_roles(grant_fetcher, iam_users.keys())
+        role_service = RoleService(db_connection)
+        users_with_roles = await get_users_with_roles(role_service, iam_users.keys())
         for group, users in iam_users.items():
             # mysql role does not need email part and can be truncated
             role = mysql_username(group)
             # truncate mysql_usernames
             mysql_usernames = [mysql_username(user) for user in users]
             await create_group_role(db_connection, role)
-            users_missing_role = await get_users_missing_role(
-                grant_fetcher, role, users
-            )
+            users_missing_role = await get_users_missing_role(role_service, role, users)
             print(
                 f"Users missing role `{role}` for instance `{instance_connection_name}`: {users_missing_role}"
             )
@@ -443,14 +441,14 @@ async def manage_instance_roles(instance_connection_name, iam_users, creds):
     return
 
 
-async def get_users_missing_role(grant_fetcher, role, users):
+async def get_users_missing_role(role_service, role, users):
     """Find DB users' missing DB role.
 
     Given a list of DB users, and a specific DB role, find all DB users that don't have the
     role granted to them.
 
     Args:
-        grant_fetcher: A GrantFetcher class object.
+        role_service: A RoleService class object.
         role: Name of DB role to query each user for.
         users: List of DB users' usernames.
 
@@ -462,7 +460,7 @@ async def get_users_missing_role(grant_fetcher, role, users):
         # mysql usernames are truncated to before '@' sign
         user = mysql_username(user)
         # fetch granted DB roles of user
-        results = await grant_fetcher.fetch_user_grants(user)
+        results = await role_service.fetch_user_grants(user)
         has_grant = False
         # look for role among roles granted to user
         for result in results:
@@ -476,11 +474,11 @@ async def get_users_missing_role(grant_fetcher, role, users):
     return users_missing_role
 
 
-async def get_users_with_roles(grant_fetcher, group_names):
+async def get_users_with_roles(role_service, group_names):
     """Get mapping of group role grants on DB users.
 
     Args:
-        grant_fetcher: A GrantFetcher class instance.
+        role_service: A RoleService class instance.
         group_names: List of all IAM group names.
 
     Returns: Dict mapping group role to all users who have the role granted to them.
@@ -488,7 +486,7 @@ async def get_users_with_roles(grant_fetcher, group_names):
     role_grants = defaultdict(list)
     for group_name in group_names:
         group_name = mysql_username(group_name)
-        grants = await grant_fetcher.fetch_role_grants(group_name)
+        grants = await role_service.fetch_role_grants(group_name)
         # loop through grants that are in tuple form (FROM_USER, TO_USER)
         for grant in grants:
             # filter into dict for easier access later

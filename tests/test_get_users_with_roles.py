@@ -17,11 +17,11 @@ from app import get_users_with_roles
 from collections import defaultdict
 
 # fake fetcher class using duck typing
-class FakeFetcher:
-    """Fake GrantFetcher class for testing"""
+class FakeRoleService:
+    """Fake RoleService class for testing"""
 
     def __init__(self, results):
-        """Initializes a FakeFetcher
+        """Initializes a FakeRoleService
 
         Args:
             results: List with tuples in form (FROM_USER, TO_USER) showing grants.
@@ -37,8 +37,8 @@ class FakeFetcher:
 async def test_single_group_role():
     "Test with single group role for happy path when multiples users are granted group role."
     data = {"group": [("group", "user"), ("group", "user2"), ("group", "user3")]}
-    fake_fetcher = FakeFetcher(data)
-    users_with_roles = await get_users_with_roles(fake_fetcher, ["group@test.com"])
+    role_service = FakeRoleService(data)
+    users_with_roles = await get_users_with_roles(role_service, ["group@test.com"])
     assert users_with_roles == {"group": ["user", "user2", "user3"]}
 
 
@@ -49,9 +49,9 @@ async def test_multiple_group_roles():
         "group": [("group", "user"), ("group", "user2")],
         "group2": [("group2", "user3"), ("group2", "user4")],
     }
-    fake_fetcher = FakeFetcher(data)
+    role_service = FakeRoleService(data)
     users_with_roles = await get_users_with_roles(
-        fake_fetcher, ["group@test.com", "group2@test.com"]
+        role_service, ["group@test.com", "group2@test.com"]
     )
     assert users_with_roles == {
         "group": ["user", "user2"],
@@ -65,8 +65,8 @@ async def test_no_users_with_roles():
 
     Should return empty defaultdict of type list"""
     data = defaultdict(list)
-    fake_fetcher = FakeFetcher(data)
-    users_with_roles = await get_users_with_roles(fake_fetcher, ["group@test.com"])
+    role_service = FakeRoleService(data)
+    users_with_roles = await get_users_with_roles(role_service, ["group@test.com"])
     assert users_with_roles == defaultdict(list)
 
 
@@ -80,9 +80,9 @@ async def test_no_users_for_one_role():
         "group2": [("group2", "user3"), ("group2", "user4")],
         "group3": [],
     }
-    fake_fetcher = FakeFetcher(data)
+    role_service = FakeRoleService(data)
     users_with_roles = await get_users_with_roles(
-        fake_fetcher, ["group@test.com", "group2@test.com", "group3@test.com"]
+        role_service, ["group@test.com", "group2@test.com", "group3@test.com"]
     )
     assert users_with_roles == {
         "group": ["user", "user2"],
