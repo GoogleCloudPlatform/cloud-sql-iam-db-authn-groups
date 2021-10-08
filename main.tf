@@ -3,6 +3,10 @@ variable region {
   default = "us-central1"
 }
 
+variable zone {
+  type = string
+  default = "us-centra11-c"
+}
 
 variable project_id {
   type = string
@@ -20,7 +24,7 @@ terraform {
   required_providers {
     google = {
       source = "hashicorp/google"
-      version = "3.5.0"
+      version = "3.87.0"
     }
   }
 }
@@ -31,11 +35,10 @@ provider "google" {
   zone    = var.zone
 }
 
-
 resource "google_service_account" "groups_authn" {
-  account_id = "groups-authn"
+  account_id  = "groups-authn"
   description = "Service account for the IAM DB groups authn service."
-  project    = var.project_id
+  project     = var.project_id
 }
 
 resource "google_project_iam_binding" "cloudsql_client" {
@@ -45,9 +48,15 @@ resource "google_project_iam_binding" "cloudsql_client" {
   ]
 }
 
+resource "google_project_iam_binding" "token_creator_iam" {
+  role    = "roles/iam.serviceAccountTokenCreator"
+  members = [
+    "serviceAccount:${google_service_account.groups_authn.email}"
+  ]
+}
 
-resource "google_cloud_run_service" "groups_authn" {
-  name     = "iam db authn groups"
+resource "google_cloud_run_service" "groups-authn" {
+  name     = "iam-db-authn-groups"
   location = var.region
 
   template {
@@ -71,4 +80,21 @@ resource "google_cloud_run_service" "groups_authn" {
     percent         = 100
     latest_revision = true
   }
+}
+
+data "google_iam_policy" "noauth" {
+  binding {
+    role = "roles/run.invoker"
+    members = [
+      "allUsers",
+    ]
+  }
+}
+
+resource "google_cloud_run_service_iam_policy" "noauth" {
+  location    = google_cloud_run_service.groups-authn.location
+  project     = var.project_id
+  service     = google_cloud_run_service.groups-authn.name
+
+  policy_data = data.google_iam_policy.noauth.policy_data
 }
