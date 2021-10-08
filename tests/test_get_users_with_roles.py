@@ -35,7 +35,7 @@ class FakeRoleService:
 
 @pytest.mark.asyncio
 async def test_single_group_role():
-    "Test with single group role for happy path when multiples users are granted group role."
+    """Test with single group role for happy path when multiples users are granted group role."""
     data = {"group": [("group", "user"), ("group", "user2"), ("group", "user3")]}
     role_service = FakeRoleService(data)
     users_with_roles = await get_users_with_roles(role_service, ["group@test.com"])
@@ -44,7 +44,7 @@ async def test_single_group_role():
 
 @pytest.mark.asyncio
 async def test_multiple_group_roles():
-    "Test with multiple group roles for happy path when multiples users are granted group role."
+    """Test with multiple group roles for happy path when multiples users are granted group role."""
     data = {
         "group": [("group", "user"), ("group", "user2")],
         "group2": [("group2", "user3"), ("group2", "user4")],
