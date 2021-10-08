@@ -438,11 +438,12 @@ async def get_instance_users(user_service, instance_connection_names):
     return db_users
 
 
-async def manage_instance_roles(instance_connection_name, iam_users, creds):
-    """Function to manage database instance roles.
+async def manage_instance_users(instance_connection_name, iam_users, creds):
+    """Function to manage database instance users.
 
-    Manage DB roles within database instance which includes: connect to instance,
-    verify/create group roles, add roles to DB users who are missing them.
+    Manage DB users within database instance which includes: connect to instance,
+    verify/create group roles, add roles to DB users who are missing them,
+    and revoke roles from users no longer in IAM group.
 
     Args:
         instance_connection_name: Instance connection name of Cloud SQL instance.
@@ -454,32 +455,38 @@ async def manage_instance_roles(instance_connection_name, iam_users, creds):
     # create connection to db instance
     async with db.connect() as db_connection:
         role_service = RoleService(db_connection)
-        users_with_roles = await get_users_with_roles(role_service, iam_users.keys())
-        for group, users in iam_users.items():
-            # mysql role does not need email part and can be truncated
-            role = mysql_username(group)
-            # truncate mysql_usernames
-            mysql_usernames = [mysql_username(user) for user in users]
-            await role_service.create_group_role(role)
-            users_missing_role = await get_users_missing_role(role_service, role, users)
-            print(
-                f"Users missing role `{role}` for instance `{instance_connection_name}`: {users_missing_role}"
-            )
-            await role_service.grant_group_role(role, users_missing_role)
-            print(
-                f"Granted the following users the role `{role}` on instance `{instance_connection_name}`: {users_missing_role}"
-            )
-            # get list of users who have group role but are not in IAM group
-            users_to_revoke = [
-                user_with_role
-                for user_with_role in users_with_roles[role]
-                if user_with_role not in mysql_usernames
-            ]
-            await role_service.revoke_group_role(role, users_to_revoke)
-            print(
-                f"Revoked the following users the role `{role}` on instance `{instance_connection_name}`: {users_to_revoke}"
-            )
+        await manage_user_roles(role_service, iam_users)
     return
+
+
+async def manage_user_roles(role_service, iam_users):
+    """Manage group role permissions for DB users.
+
+    Create, grant, revoke proper IAM group role permissions to database users.
+
+    Args:
+        role_service: A RoleService class object for accessing grants in db.
+        iam_users: Set containing all IAM users found within IAM groups.
+    """
+    users_with_roles = await get_users_with_roles(role_service, iam_users.keys())
+    for group, users in iam_users.items():
+        # mysql role does not need email part and can be truncated
+        role = mysql_username(group)
+        # truncate mysql_usernames
+        mysql_usernames = [mysql_username(user) for user in users]
+        # create or verify group role exists
+        await role_service.create_group_role(role)
+        # find DB users who are part of IAM group that need role granted to them
+        users_missing_role = await get_users_missing_role(role_service, role, users)
+        await role_service.grant_group_role(role, users_missing_role)
+        # get list of users who have group role but are not in IAM group
+        users_to_revoke = [
+            user_with_role
+            for user_with_role in users_with_roles[role]
+            if user_with_role not in mysql_usernames
+        ]
+        # revoke group role from users no longer in IAM group
+        await role_service.revoke_group_role(role, users_to_revoke)
 
 
 async def get_users_missing_role(role_service, role, users):
@@ -660,9 +667,9 @@ async def run():
                 user, InstanceConnectionName(*instance.split(":"))
             )
 
-    # for each instance add IAM group roles to manage permissions and grant roles if need be
+    # for each instance manage users and group role permissions
     instance_coroutines = [
-        manage_instance_roles(instance, iam_users, sql_creds)
+        manage_instance_users(instance, iam_users, sql_creds)
         for instance in sql_instances
     ]
     await asyncio.gather(*instance_coroutines)
