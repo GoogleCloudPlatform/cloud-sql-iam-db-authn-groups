@@ -41,6 +41,12 @@ resource "google_service_account" "groups_authn" {
   project     = var.project_id
 }
 
+resource "google_service_account" "scheduler" {
+  account_id = "scheduler"
+  description = "Service account for Cloud scheduler"
+  project    = var.project_id
+}
+
 resource "google_project_iam_binding" "cloudsql_client" {
   role    = "roles/cloudsql.client"
   members = [
@@ -55,7 +61,22 @@ resource "google_project_iam_binding" "token_creator_iam" {
   ]
 }
 
-resource "google_cloud_run_service" "groups-authn" {
+resource "google_project_iam_binding" "run_invoker" {
+  role    = "roles/run.invoker"
+  members = [
+    "serviceAccount:${google_service_account.groups_authn.email}",
+    "serviceAccount:${google_service_account.scheduler.email}",
+  ]
+}
+
+# Enables the Cloud Run API
+resource "google_project_service" "run_api" {
+  service = "run.googleapis.com"
+
+  disable_on_destroy = true
+}
+
+resource "google_cloud_run_service" "groups_authn_service" {
   name     = "iam-db-authn-groups"
   location = var.region
 
@@ -80,6 +101,13 @@ resource "google_cloud_run_service" "groups-authn" {
     percent         = 100
     latest_revision = true
   }
+  
+  depends_on = [google_project_service.run_api]
+}
+
+# Display the service URL
+output "service_url" {
+  value = google_cloud_run_service.groups_authn_service.status[0].url
 }
 
 data "google_iam_policy" "noauth" {
@@ -92,9 +120,29 @@ data "google_iam_policy" "noauth" {
 }
 
 resource "google_cloud_run_service_iam_policy" "noauth" {
-  location    = google_cloud_run_service.groups-authn.location
+  location    = google_cloud_run_service.groups_authn_service.location
   project     = var.project_id
-  service     = google_cloud_run_service.groups-authn.name
+  service     = google_cloud_run_service.groups_authn_service.name
 
   policy_data = data.google_iam_policy.noauth.policy_data
+}
+
+resource "google_cloud_scheduler_job" "group_authn_scheduler" {
+  name             = "IAM-groups-authn-scheduler"
+  description      = "Job to trigger IAM groups authn"
+  schedule         = "*/10 * * * *"
+  time_zone        = "GMT" 
+
+  retry_config {
+    retry_count = 1
+  }
+
+  http_target {
+    http_method = "GET"
+    uri         = "${google_cloud_run_service.groups_authn_service.status[0].url}/"
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler.email
+    }
+  }
 }
