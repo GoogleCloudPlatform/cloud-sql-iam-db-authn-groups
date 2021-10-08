@@ -29,7 +29,7 @@ class FakeRoleService:
         self.results = results
 
     async def fetch_role_grants(self, group_name):
-        """Fake make_query for testing"""
+        """Fake fetch_role_grants for testing"""
         return self.results[group_name]
 
 

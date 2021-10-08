@@ -63,20 +63,6 @@ class RoleService:
         """
         self.db = db
 
-    async def fetch_user_grants(self, user):
-        """Fetch DB grants of a DB user.
-
-        Args:
-            user: Username of a DB user.
-
-        Returns:
-            results: List of grants for the DB user.
-        """
-        # query roles granted to user
-        stmt = sqlalchemy.text("SHOW GRANTS FOR :user")
-        results = (await self.db.execute(stmt, {"user": user})).fetchall()
-        return results
-
     async def fetch_role_grants(self, group_name):
         """Fetch mappings of group roles granted to DB users.
 
@@ -477,8 +463,12 @@ async def manage_user_roles(role_service, iam_users):
         # create or verify group role exists
         await role_service.create_group_role(role)
         # find DB users who are part of IAM group that need role granted to them
-        users_missing_role = await get_users_missing_role(role_service, role, users)
-        await role_service.grant_group_role(role, users_missing_role)
+        users_to_grant = [
+            username
+            for username in mysql_usernames
+            if username not in users_with_roles[role]
+        ]
+        await role_service.grant_group_role(role, users_to_grant)
         # get list of users who have group role but are not in IAM group
         users_to_revoke = [
             user_with_role
@@ -487,39 +477,6 @@ async def manage_user_roles(role_service, iam_users):
         ]
         # revoke group role from users no longer in IAM group
         await role_service.revoke_group_role(role, users_to_revoke)
-
-
-async def get_users_missing_role(role_service, role, users):
-    """Find DB users' missing DB role.
-
-    Given a list of DB users, and a specific DB role, find all DB users that don't have the
-    role granted to them.
-
-    Args:
-        role_service: A RoleService class object.
-        role: Name of DB role to query each user for.
-        users: List of DB users' usernames.
-
-    Returns:
-        users_missing_role: List of DB usernames for users who are missing role.
-    """
-    users_missing_role = []
-    for user in users:
-        # mysql usernames are truncated to before '@' sign
-        user = mysql_username(user)
-        # fetch granted DB roles of user
-        results = await role_service.fetch_user_grants(user)
-        has_grant = False
-        # look for role among roles granted to user
-        for result in results:
-            result = str(result)
-            if result.find(f"`{role}`") >= 0:
-                has_grant = True
-                break
-        # if user doesn't have role add them to list
-        if not has_grant:
-            users_missing_role.append(user)
-    return users_missing_role
 
 
 async def get_users_with_roles(role_service, group_names):
