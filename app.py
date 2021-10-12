@@ -26,7 +26,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from collections import defaultdict
 from typing import NamedTuple
-from functools import partial
+from functools import partial, reduce
 
 # URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
@@ -86,7 +86,7 @@ def load_config(filename="config.json"):
 
     Example config file:
     {
-        "instance_to_groups_mapping" : {
+        "instance_to_groups" : {
             "my-project:my-region:my-instance" : ["group@example.com", "othergroup@example.com"],
             "my-other-project:my-other-region:my-other-instance" : ["group@example.com"]
         },
@@ -97,7 +97,7 @@ def load_config(filename="config.json"):
         filename: The name of the configurable json file.
 
     Returns:
-        instance_to_groups_mapping: Dict with Cloud SQL instance connection names as keys and
+        instance_to_groups: Dict with Cloud SQL instance connection names as keys and
             list of IAM groups to manage DB users of as values.
         admin_email: Email of user with proper admin privileges for Google Workspace, needed
             for calling Directory API to fetch IAM users within IAM groups.
@@ -105,15 +105,15 @@ def load_config(filename="config.json"):
     with open(filename) as json_file:
         config = json.load(json_file)
 
-    instance_to_groups_mapping = config["instance_to_groups_mapping"]
+    instance_to_groups = config["instance_to_groups"]
     admin_email = config["admin_email"]
 
     # verify config params are not empty
-    if instance_to_groups_mapping is None or instance_to_groups_mapping == {}:
-        raise ValueError(build_error_message("instance_to_groups_mapping"))
+    if instance_to_groups is None or instance_to_groups == {}:
+        raise ValueError(build_error_message("instance_to_groups"))
     if admin_email is None or admin_email == "":
         raise ValueError(build_error_message("admin_email"))
-    return instance_to_groups_mapping, admin_email
+    return instance_to_groups, admin_email
 
 
 def build_error_message(var_name):
@@ -127,7 +127,7 @@ def build_error_message(var_name):
     """
     message = (
         f"\nNo valid `{var_name}` configured, please verify your config.json.\n"
-        '\nValid configuration should look like:\n\n{\n  "instance_to_groups_mapping" : {\n    '
+        '\nValid configuration should look like:\n\n{\n  "instance_to_groups" : {\n    '
         '"my-project:my-region:my-instance" : ["group@example.com", "othergroup@example.com"],'
         '\n    "my-other-project:my-other-region:my-other-instance" : ["group@example.com"]'
         '\n  }\n  "admin_email" : "admin@example.com"\n}\n\nYour configuration is '
@@ -533,13 +533,15 @@ def delegated_credentials(creds, scopes, admin_user=None):
     return updated_credentials
 
 
-def get_users_to_add(instance_to_groups_mapping, iam_users, instance_users):
+def get_users_to_add(instance_to_groups, iam_users, instance_users):
     """Find IAM users who are missing as DB users.
 
     Given a dict mapping IAM groups to their IAM users, and a dict mapping Cloud SQL
     instances to their DB users, find IAM users who are missing their corresponding DB user.
 
     Args:
+        instance_to_groups: Dict with Cloud SQL instance connection names as keys and
+            list of IAM groups to manage DB users of as values.
         iam_users: Dict where key is IAM group name and mapped value is list of that group's
             IAM users. (e.g. iam_users["example-group@abc.com] = ["user1", "user2", "user3"])
         instance_users: Dict where key is instance name and mapped value is list of that
@@ -550,7 +552,7 @@ def get_users_to_add(instance_to_groups_mapping, iam_users, instance_users):
             needing to be inserted into instance.
     """
     missing_db_users = defaultdict(set)
-    for instance, iam_groups in instance_to_groups_mapping.items():
+    for instance, iam_groups in instance_to_groups.items():
         db_users = instance_users[instance]
         for iam_group in iam_groups:
             users = iam_users[iam_group]
@@ -586,7 +588,7 @@ def sanity_check():
 @app.route("/run", methods=["GET"])
 async def run():
     # read in config params
-    instance_to_groups_mapping, admin_email = load_config("config.json")
+    instance_to_groups, admin_email = load_config("config.json")
     # grab default creds from cloud run service account
     creds, project = default()
     # update default credentials with IAM SCOPE and domain delegation
@@ -598,11 +600,10 @@ async def run():
     user_service = UserService(sql_creds, iam_creds)
 
     # get list of sql_instance names and set of all iam group names
-    iam_groups = set()
-    for iam_group_names in instance_to_groups_mapping.values():
-        iam_groups = iam_groups.union(set(iam_group_names))
-
-    sql_instances = list(instance_to_groups_mapping.keys())
+    iam_groups = reduce(
+        lambda acc, cur: acc.union(set(cur)), instance_to_groups.values(), set()
+    )
+    sql_instances = list(instance_to_groups.keys())
 
     iam_users, instance_users = await asyncio.gather(
         get_iam_users(user_service, iam_groups),
@@ -617,9 +618,7 @@ async def run():
         print(f"DB Users in instance `{instance_name}`: {db_users}")
 
     # find IAM users who are missing as DB users
-    users_to_add = get_users_to_add(
-        instance_to_groups_mapping, iam_users, instance_users
-    )
+    users_to_add = get_users_to_add(instance_to_groups, iam_users, instance_users)
     for instance, users in users_to_add.items():
         print(f"Missing IAM DB users for instance `{instance}`: {users}")
         for user in users:
@@ -630,7 +629,7 @@ async def run():
     # for each instance add IAM group roles to manage permissions and grant roles if need be
     instance_coroutines = [
         manage_instance_roles(
-            instance, instance_to_groups_mapping[instance], iam_users, sql_creds
+            instance, instance_to_groups[instance], iam_users, sql_creds
         )
         for instance in sql_instances
     ]
