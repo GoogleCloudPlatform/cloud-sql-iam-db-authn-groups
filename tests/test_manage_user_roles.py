@@ -31,9 +31,7 @@ class FakeRoleService:
 
     async def fetch_role_grants(self, group_name):
         """Fake fetch_role_grants for testing"""
-        if group_name not in self.role_grants:
-            return []
-        return self.role_grants[group_name]
+        return self.role_grants.get(group_name, [])
 
     async def create_group_role(self, role):
         """Fake create_group_role for testing, does nothing"""
@@ -42,11 +40,13 @@ class FakeRoleService:
         return
 
     async def grant_group_role(self, role, users_missing_role):
+        """Fake grant_group_role for testing"""
         for user in users_missing_role:
             self.users_with_roles[role].append(user)
         return
 
     async def revoke_group_role(self, role, users_to_revoke):
+        """Fake revoke_group_role for testing"""
         for user in users_to_revoke:
             self.users_with_roles[role].remove(user)
         return
