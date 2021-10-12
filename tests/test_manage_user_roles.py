@@ -82,22 +82,14 @@ async def test_grant_roles():
     """Test where IAM group members need to be granted group roles.
 
     Should return with users_with_roles having new IAM users with granted roles."""
-    iam_users = {
-        "iam-group": ["user@test.com", "user2@test.com"],
-        "iam-group2": ["user3@test.com", "user4@test.com"],
-    }
-    # user2 and user3 missing a group role each
-    role_grants = {
-        "iam-group": [("iam-group", "user")],
-        "iam-group2": [("iam-group2", "user4")],
-    }
-    users_with_roles = {"iam-group": ["user"], "iam-group2": ["user4"]}
+    iam_users = {"iam-group": ["user@test.com", "user2@test.com"]}
+    # user2 is missing the group role
+    role_grants = {"iam-group": [("iam-group", "user")]}
+    users_with_roles = {"iam-group": ["user"]}
     role_service = FakeRoleService(role_grants, users_with_roles)
     users_with_roles = await manage_user_roles(role_service, iam_users)
-    # user2 and user3 should now have roles
-    assert set(role_service.users_with_roles) == set(
-        {"iam-group": ["user", "user2"], "iam-group2": ["user3", "user4"]}
-    )
+    # user2 should now have group role
+    assert set(role_service.users_with_roles) == set({"iam-group": ["user", "user2"]})
 
 
 @pytest.mark.asyncio
@@ -105,22 +97,14 @@ async def test_revoke_roles():
     """Test where DB Users have IAM group role but are not IAM group members.
 
     Should return users_with_roles having revoked group roles from DB users not in IAM group."""
-    iam_users = {"iam-group": ["user@test.com"], "iam-group2": ["user3@test.com"]}
-    # user2 and user4 have a group role each but are not in IAM groups
-    role_grants = {
-        "iam-group": [("iam-group", "user"), ("iam-group", "user2")],
-        "iam-group2": [("iam-group2", "user3"), ("iam-group2", "user4")],
-    }
-    users_with_roles = {
-        "iam-group": ["user", "user2"],
-        "iam-group2": ["user3", "user4"],
-    }
+    iam_users = {"iam-group": ["user@test.com"]}
+    # user2 has group role but is not in IAM group
+    role_grants = {"iam-group": [("iam-group", "user"), ("iam-group", "user2")]}
+    users_with_roles = {"iam-group": ["user", "user2"]}
     role_service = FakeRoleService(role_grants, users_with_roles)
     users_with_roles = await manage_user_roles(role_service, iam_users)
-    # user2 and user4 should have had roles revoked and no longer have them
-    assert set(role_service.users_with_roles) == set(
-        {"iam-group": ["user"], "iam-group2": ["user3"]}
-    )
+    # user2 should have had group role revoked
+    assert set(role_service.users_with_roles) == set({"iam-group": ["user"]})
 
 
 @pytest.mark.asyncio
@@ -128,24 +112,14 @@ async def test_empty_role_grants():
     """Test where no IAM DB users have roles granted.
 
     Should return users_with_roles having granted proper group roles to all users."""
-    iam_users = {
-        "iam-group": ["user@test.com", "user2@test.com"],
-        "iam-group2": ["user3@test.com"],
-        "iam-group3": ["user4@test.com"],
-    }
+    iam_users = {"iam-group": ["user@test.com", "user2@test.com"]}
     # no roles granted, should create and grant roles to users
     role_grants = defaultdict(list)
     users_with_roles = defaultdict(list)
     role_service = FakeRoleService(role_grants, users_with_roles)
     users_with_roles = await manage_user_roles(role_service, iam_users)
     # all IAM users should have DB users with proper group roles
-    assert set(role_service.users_with_roles) == set(
-        {
-            "iam-group": ["user", "user2"],
-            "iam-group2": ["user3"],
-            "iam-group3": ["user4"],
-        }
-    )
+    assert set(role_service.users_with_roles) == set({"iam-group": ["user", "user2"]})
 
 
 @pytest.mark.asyncio
@@ -153,28 +127,17 @@ async def test_grant_and_revoke():
     """Test where an IAM user switches IAM groups.
 
     Should return users_with_roles having granted user new role and revoked old role."""
-    iam_users = {
-        "iam-group": ["user@test.com", "user2@test.com"],
-        "iam-group2": ["user3@test.com"],
-        "iam-group3": ["user4@test.com"],
-    }
-    # user4 goes from `iam-group2` to `iam-group3`
+    iam_users = {"iam-group": ["user@test.com", "user2@test.com"]}
+    # user2 goes from `iam-group2` to `iam-group`
     role_grants = {
-        "iam-group": [("iam-group", "user"), ("iam-group", "user2")],
-        "iam-group2": [("iam-group2", "user3"), ("iam-group2", "user4")],
+        "iam-group": [("iam-group", "user")],
+        "iam-group2": [("iam-group2", "user2")],
     }
-    users_with_roles = {
-        "iam-group": ["user", "user2"],
-        "iam-group2": ["user3", "user4"],
-    }
+    users_with_roles = {"iam-group": ["user"], "iam-group2": ["user2"]}
     role_service = FakeRoleService(role_grants, users_with_roles)
     users_with_roles = await manage_user_roles(role_service, iam_users)
     assert set(role_service.users_with_roles) == set(
-        {
-            "iam-group": ["user", "user2"],
-            "iam-group2": ["user3"],
-            "iam-group3": ["user4"],
-        }
+        {"iam-group": ["user", "user2"], "iam-group2": []}
     )
 
 
@@ -184,34 +147,26 @@ async def test_create_grant_revoke():
 
     Should return users_with_roles having created new role, granted roles and revoked roles"""
     iam_users = {
-        "iam-group": ["user@test.com", "user2@test.com", "user3@test.com"],
-        "iam-group2": ["user3@test.com"],
-        "iam-group3": ["user4@test.com", "user5@test.com"],
-        "iam-group4": [],
+        "iam-group": ["user@test.com", "user2@test.com"],
+        "iam-group2": ["user2@test.com"],
+        "iam-group3": ["user3@test.com"],
     }
     # Operations:
-    # - user3 needs to be granted role `iam-group`
-    # - user4 needs to be revoked role `iam-group2`
-    # - role created for `iam-group3` and granted to user4 and user5
-    # - user4 and user5 need to be revoked role `iam-group4`
+    # - user2 needs to be granted role `iam-group`
+    # - user3 needs to be revoked role `iam-group2`
+    # - role created for `iam-group3` and granted to user3
     role_grants = {
-        "iam-group": [("iam-group", "user"), ("iam-group", "user2")],
-        "iam-group2": [("iam-group2", "user3"), ("iam-group2", "user4")],
-        "iam-group4": [("iam-group4", "user4"), ("iam-group4", "user5")],
+        "iam-group": [("iam-group", "user")],
+        "iam-group2": [("iam-group2", "user2"), ("iam-group2", "user3")],
     }
-    users_with_roles = {
-        "iam-group": ["user", "user2"],
-        "iam-group2": ["user3", "user4"],
-        "iam-group4": ["user4", "user5"],
-    }
+    users_with_roles = {"iam-group": ["user"], "iam-group2": ["user2", "user3"]}
     role_service = FakeRoleService(role_grants, users_with_roles)
     users_with_roles = await manage_user_roles(role_service, iam_users)
     # all IAM users should have DB users with proper group roles
     assert set(role_service.users_with_roles) == set(
         {
-            "iam-group": ["user", "user2", "user3"],
-            "iam-group2": ["user3"],
-            "iam-group3": ["user4", "user5"],
-            "iam-group4": [],
+            "iam-group": ["user", "user2"],
+            "iam-group2": ["user2"],
+            "iam-group3": ["user3"],
         }
     )
