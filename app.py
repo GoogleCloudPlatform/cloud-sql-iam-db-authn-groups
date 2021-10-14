@@ -23,6 +23,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from collections import defaultdict
 from typing import NamedTuple
+from google.cloud.sql.connector import connector
 
 # URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
@@ -190,34 +191,21 @@ def init_connection_engine(instance_connection_name, creds):
         creds: Credentials to get OAuth2 access token from, needed for IAM service
             account authentication to DB.
     """
-    db_config = {
-        "pool_size": 5,
-        "max_overflow": 2,
-        "pool_timeout": 30,  # 30 seconds
-        "pool_recycle": 1800,  # 30 minutes
-    }
-
     # service account email to access DB, mysql truncates usernames to before '@' sign
     service_account_email = mysql_username(creds.service_account_email)
-    return init_unix_connection_engine(
-        instance_connection_name, db_config, service_account_email, creds
+    return init_public_ip_connection_engine(
+        instance_connection_name, service_account_email, creds
     )
 
 
-def init_unix_connection_engine(
-    instance_connection_name, db_config, service_account_email, creds
+def init_public_ip_connection_engine(
+    instance_connection_name, service_account_email, creds
 ):
-    """Load and initialize database connection pool via Unix socket connection.
-
-    Loads in the parameters for the database connection pool. Initiliazes
-    the database connection pool through Unix socket which is recommended route for
-    public IP.
+    """Load and initialize database connection pool via Cloud SQL Python Connector.
 
     Args:
         instance_connection_name: Instance connection name of Cloud SQL instance.
             (e.g. "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>")
-        db_config: A dict mapping database config parameters to their corresponding
-            values.
         service_account_email: Email address of service account to use for connecting
             to instance.
         creds: Credentials to get OAuth2 access token from, needed for IAM service
@@ -226,28 +214,18 @@ def init_unix_connection_engine(
     Returns:
         A database connection pool instance.
     """
-    # config for service account DB user
-    db_user = service_account_email
-    db_pass = str(creds.token)
-    db_name = ""
-    db_socket_dir = os.environ.get("DB_SOCKET_DIR", "/cloudsql")
-
-    pool = sqlalchemy.create_engine(
-        # Equivalent URL:
-        # mysql+pymysql://<db_user>:<db_pass>@/<db_name>?unix_socket=<socket_path>/<cloud_sql_instance_name>
-        sqlalchemy.engine.url.URL.create(
-            drivername="mysql+pymysql",
-            username=db_user,  # e.g. "my-database-user"
-            password=db_pass,  # e.g. "my-database-password"
-            database=db_name,  # e.g. "my-database-name"
-            query={
-                "unix_socket": "{}/{}".format(
-                    db_socket_dir, instance_connection_name  # e.g. "/cloudsql"
-                )  # i.e "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>"
-            },
-        ),
-        **db_config,
+    # build connection for db using Python Connector
+    connection = lambda: connector.connect(
+        instance_connection_name,
+        "pymysql",
+        user=service_account_email,
+        password=str(creds.token),
+        db="",
+        enable_iam_auth=True,
     )
+
+    # create connection pool
+    pool = sqlalchemy.create_engine("mysql+pymysql://", creator=connection)
     return pool
 
 
