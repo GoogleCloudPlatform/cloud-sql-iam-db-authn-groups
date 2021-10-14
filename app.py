@@ -201,7 +201,7 @@ def init_connection_engine(instance_connection_name, creds):
     }
     # service account email to access DB, mysql truncates usernames to before '@' sign
     service_account_email = mysql_username(creds.service_account_email)
-    
+
     # build connection for db using Python Connector
     connection = lambda: connector.connect(
         instance_connection_name,
