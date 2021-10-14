@@ -182,38 +182,26 @@ def init_connection_engine(instance_connection_name, creds):
     """Configure and initialize database connection pool.
 
     Configures the parameters for the database connection pool. Initiliazes the
-    database connection pool either through TCP (private IP) or via Unix socket
-    (public IP).
+    database connection pool using the Cloud SQL Python Connector.
 
     Args:
         instance_connection_name: Instance connection name of Cloud SQL instance.
             (e.g. "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>")
-        creds: Credentials to get OAuth2 access token from, needed for IAM service
-            account authentication to DB.
-    """
-    # service account email to access DB, mysql truncates usernames to before '@' sign
-    service_account_email = mysql_username(creds.service_account_email)
-    return init_public_ip_connection_engine(
-        instance_connection_name, service_account_email, creds
-    )
-
-
-def init_public_ip_connection_engine(
-    instance_connection_name, service_account_email, creds
-):
-    """Load and initialize database connection pool via Cloud SQL Python Connector.
-
-    Args:
-        instance_connection_name: Instance connection name of Cloud SQL instance.
-            (e.g. "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>")
-        service_account_email: Email address of service account to use for connecting
-            to instance.
         creds: Credentials to get OAuth2 access token from, needed for IAM service
             account authentication to DB.
 
     Returns:
         A database connection pool instance.
     """
+    db_config = {
+        "pool_size": 5,
+        "max_overflow": 2,
+        "pool_timeout": 30,  # 30 seconds
+        "pool_recycle": 1800,  # 30 minutes
+    }
+    # service account email to access DB, mysql truncates usernames to before '@' sign
+    service_account_email = mysql_username(creds.service_account_email)
+    
     # build connection for db using Python Connector
     connection = lambda: connector.connect(
         instance_connection_name,
@@ -225,7 +213,7 @@ def init_public_ip_connection_engine(
     )
 
     # create connection pool
-    pool = sqlalchemy.create_engine("mysql+pymysql://", creator=connection)
+    pool = sqlalchemy.create_engine("mysql+pymysql://", creator=connection, **db_config)
     return pool
 
 
