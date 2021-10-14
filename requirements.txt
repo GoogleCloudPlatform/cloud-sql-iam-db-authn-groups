@@ -4,3 +4,4 @@ SQLAlchemy==1.4.22
 google-api-python-client==2.19.1
 google-auth==2.0.0
 PyMySQL==1.0.2
+cloud-sql-python-connector[pymysql]==0.4.1
