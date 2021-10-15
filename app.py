@@ -172,7 +172,6 @@ def load_config(filename="config.json"):
     sql_instances = config["sql_instances"]
     iam_groups = config["iam_groups"]
     admin_email = config["admin_email"]
-    private_ip = config["private_ip"]
 
     # try reading in private_ip param, default to False
     try:
