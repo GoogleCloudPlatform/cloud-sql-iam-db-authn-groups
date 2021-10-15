@@ -141,7 +141,7 @@ def load_config(filename="config.json"):
         iam_groups: List of all IAM Groups to manage DB users of.
         admin_email: Email of user with proper admin privileges for Google Workspace, needed
             for calling Directory API to fetch IAM users within IAM groups.
-        private_ip: Boolean flag for private or public IP addresses.
+        private_ip (optional): Boolean flag for private or public IP addresses.
     """
     with open(filename) as json_file:
         config = json.load(json_file)
@@ -149,7 +149,12 @@ def load_config(filename="config.json"):
     sql_instances = config["sql_instances"]
     iam_groups = config["iam_groups"]
     admin_email = config["admin_email"]
-    private_ip = config["private_ip"]
+
+    # try reading in private_ip param, default to False
+    try:
+        private_ip = config["private_ip"]
+    except:
+        private_ip = False
 
     # verify config params are not empty
     if sql_instances is None or sql_instances == []:
@@ -158,7 +163,7 @@ def load_config(filename="config.json"):
         raise ValueError(build_error_message("iam_groups"))
     if admin_email is None or admin_email == "":
         raise ValueError(build_error_message("admin_email"))
-    if private_ip is None:
+    if private_ip is None or type(private_ip) != bool:
         raise ValueError(build_error_message("private_ip"))
     return sql_instances, iam_groups, admin_email, private_ip
 
