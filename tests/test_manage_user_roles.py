@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from collections import defaultdict
-import pytest
 from app import manage_user_roles
 
 
@@ -29,31 +28,30 @@ class FakeRoleService:
         self.role_grants = role_grants
         self.users_with_roles = users_with_roles
 
-    async def fetch_role_grants(self, group_name):
+    def fetch_role_grants(self, group_name):
         """Fake fetch_role_grants for testing"""
         return self.role_grants.get(group_name, [])
 
-    async def create_group_role(self, role):
+    def create_group_role(self, role):
         """Fake create_group_role for testing, does nothing"""
         if role not in self.users_with_roles:
             self.users_with_roles[role] = []
         return
 
-    async def grant_group_role(self, role, users_missing_role):
+    def grant_group_role(self, role, users_missing_role):
         """Fake grant_group_role for testing"""
         for user in users_missing_role:
             self.users_with_roles[role].append(user)
         return
 
-    async def revoke_group_role(self, role, users_to_revoke):
+    def revoke_group_role(self, role, users_to_revoke):
         """Fake revoke_group_role for testing"""
         for user in users_to_revoke:
             self.users_with_roles[role].remove(user)
         return
 
 
-@pytest.mark.asyncio
-async def test_correct_roles():
+def test_correct_roles():
     """Test with all DB users having correct roles, happy path.
 
     Should return users_with_roles unchanged"""
@@ -70,15 +68,14 @@ async def test_correct_roles():
         "iam-group2": ["user3", "user4"],
     }
     role_service = FakeRoleService(role_grants, users_with_roles)
-    users_with_roles = await manage_user_roles(role_service, iam_users)
+    users_with_roles = manage_user_roles(role_service, iam_users)
     assert role_service.users_with_roles == {
         "iam-group": ["user", "user2"],
         "iam-group2": ["user3", "user4"],
     }
 
 
-@pytest.mark.asyncio
-async def test_grant_roles():
+def test_grant_roles():
     """Test where IAM group members need to be granted group roles.
 
     Should return with users_with_roles having new IAM users with granted roles."""
@@ -87,13 +84,12 @@ async def test_grant_roles():
     role_grants = {"iam-group": [("iam-group", "user")]}
     users_with_roles = {"iam-group": ["user"]}
     role_service = FakeRoleService(role_grants, users_with_roles)
-    users_with_roles = await manage_user_roles(role_service, iam_users)
+    users_with_roles = manage_user_roles(role_service, iam_users)
     # user2 should now have group role
     assert set(role_service.users_with_roles) == set({"iam-group": ["user", "user2"]})
 
 
-@pytest.mark.asyncio
-async def test_revoke_roles():
+def test_revoke_roles():
     """Test where DB Users have IAM group role but are not IAM group members.
 
     Should return users_with_roles having revoked group roles from DB users not in IAM group."""
@@ -102,13 +98,12 @@ async def test_revoke_roles():
     role_grants = {"iam-group": [("iam-group", "user"), ("iam-group", "user2")]}
     users_with_roles = {"iam-group": ["user", "user2"]}
     role_service = FakeRoleService(role_grants, users_with_roles)
-    users_with_roles = await manage_user_roles(role_service, iam_users)
+    users_with_roles = manage_user_roles(role_service, iam_users)
     # user2 should have had group role revoked
     assert set(role_service.users_with_roles) == set({"iam-group": ["user"]})
 
 
-@pytest.mark.asyncio
-async def test_empty_role_grants():
+def test_empty_role_grants():
     """Test where no IAM DB users have roles granted.
 
     Should return users_with_roles having granted proper group roles to all users."""
@@ -117,13 +112,12 @@ async def test_empty_role_grants():
     role_grants = defaultdict(list)
     users_with_roles = defaultdict(list)
     role_service = FakeRoleService(role_grants, users_with_roles)
-    users_with_roles = await manage_user_roles(role_service, iam_users)
+    users_with_roles = manage_user_roles(role_service, iam_users)
     # all IAM users should have DB users with proper group roles
     assert set(role_service.users_with_roles) == set({"iam-group": ["user", "user2"]})
 
 
-@pytest.mark.asyncio
-async def test_grant_and_revoke():
+def test_grant_and_revoke():
     """Test where an IAM user switches IAM groups.
 
     Should return users_with_roles having granted user new role and revoked old role."""
@@ -135,14 +129,13 @@ async def test_grant_and_revoke():
     }
     users_with_roles = {"iam-group": ["user"], "iam-group2": ["user2"]}
     role_service = FakeRoleService(role_grants, users_with_roles)
-    users_with_roles = await manage_user_roles(role_service, iam_users)
+    users_with_roles = manage_user_roles(role_service, iam_users)
     assert set(role_service.users_with_roles) == set(
         {"iam-group": ["user", "user2"], "iam-group2": []}
     )
 
 
-@pytest.mark.asyncio
-async def test_create_grant_revoke():
+def test_create_grant_revoke():
     """Test correct management of all user permissions.
 
     Should return users_with_roles having created new role, granted roles and revoked roles"""
@@ -161,7 +154,7 @@ async def test_create_grant_revoke():
     }
     users_with_roles = {"iam-group": ["user"], "iam-group2": ["user2", "user3"]}
     role_service = FakeRoleService(role_grants, users_with_roles)
-    users_with_roles = await manage_user_roles(role_service, iam_users)
+    users_with_roles = manage_user_roles(role_service, iam_users)
     # all IAM users should have DB users with proper group roles
     assert set(role_service.users_with_roles) == set(
         {

@@ -14,10 +14,7 @@
 
 import os
 from quart import Quart
-from quart.utils import run_sync
-import asyncio
 import sqlalchemy
-from sqlalchemy.ext.asyncio import create_async_engine
 import json
 from google.auth import default, iam
 from google.auth.transport.requests import Request
@@ -26,7 +23,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from collections import defaultdict
 from typing import NamedTuple
-from functools import partial
+from google.cloud.sql.connector import connector
 
 # URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
@@ -63,7 +60,7 @@ class RoleService:
         """
         self.db = db
 
-    async def fetch_role_grants(self, group_name):
+    def fetch_role_grants(self, group_name):
         """Fetch mappings of group roles granted to DB users.
 
         Args:
@@ -76,10 +73,10 @@ class RoleService:
         stmt = sqlalchemy.text(
             "SELECT FROM_USER, TO_USER FROM mysql.role_edges WHERE FROM_USER= :group_name"
         )
-        results = (await self.db.execute(stmt, {"group_name": group_name})).fetchall()
+        results = self.db.execute(stmt, {"group_name": group_name}).fetchall()
         return results
 
-    async def create_group_role(self, group):
+    def create_group_role(self, group):
         """Verify or create DB role.
 
         Given a group name, verify existance of DB role or create new DB role matching
@@ -90,9 +87,9 @@ class RoleService:
             group: Name of group to be verified as role or created as new role.
         """
         stmt = sqlalchemy.text("CREATE ROLE IF NOT EXISTS :role")
-        await self.db.execute(stmt, {"role": group})
+        self.db.execute(stmt, {"role": group})
 
-    async def grant_group_role(self, role, users):
+    def grant_group_role(self, role, users):
         """Grant DB group role to DB users.
 
         Given a DB group role and a list of DB users, grant the DB role to each user.
@@ -104,9 +101,9 @@ class RoleService:
         """
         stmt = sqlalchemy.text("GRANT :role TO :user")
         for user in users:
-            await self.db.execute(stmt, {"role": role, "user": user})
+            self.db.execute(stmt, {"role": role, "user": user})
 
-    async def revoke_group_role(self, role, users):
+    def revoke_group_role(self, role, users):
         """Revoke DB group role to DB users.
 
         Given a DB group role and a list of DB users, revoke the DB role from each user.
@@ -118,7 +115,7 @@ class RoleService:
         """
         stmt = sqlalchemy.text("REVOKE :role FROM :user")
         for user in users:
-            await self.db.execute(stmt, {"role": role, "user": user})
+            self.db.execute(stmt, {"role": role, "user": user})
 
 
 def load_config(filename="config.json"):
@@ -185,14 +182,16 @@ def init_connection_engine(instance_connection_name, creds):
     """Configure and initialize database connection pool.
 
     Configures the parameters for the database connection pool. Initiliazes the
-    database connection pool either through TCP (private IP) or via Unix socket
-    (public IP).
+    database connection pool using the Cloud SQL Python Connector.
 
     Args:
         instance_connection_name: Instance connection name of Cloud SQL instance.
             (e.g. "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>")
         creds: Credentials to get OAuth2 access token from, needed for IAM service
             account authentication to DB.
+
+    Returns:
+        A database connection pool instance.
     """
     db_config = {
         "pool_size": 5,
@@ -200,62 +199,25 @@ def init_connection_engine(instance_connection_name, creds):
         "pool_timeout": 30,  # 30 seconds
         "pool_recycle": 1800,  # 30 minutes
     }
-
     # service account email to access DB, mysql truncates usernames to before '@' sign
     service_account_email = mysql_username(creds.service_account_email)
-    return init_unix_connection_engine(
-        instance_connection_name, db_config, service_account_email, creds
+
+    # build connection for db using Python Connector
+    connection = lambda: connector.connect(
+        instance_connection_name,
+        "pymysql",
+        user=service_account_email,
+        password=str(creds.token),
+        db="",
+        enable_iam_auth=True,
     )
 
-
-def init_unix_connection_engine(
-    instance_connection_name, db_config, service_account_email, creds
-):
-    """Load and initialize database connection pool via Unix socket connection.
-
-    Loads in the parameters for the database connection pool. Initiliazes
-    the database connection pool through Unix socket which is recommended route for
-    public IP.
-
-    Args:
-        instance_connection_name: Instance connection name of Cloud SQL instance.
-            (e.g. "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>")
-        db_config: A dict mapping database config parameters to their corresponding
-            values.
-        service_account_email: Email address of service account to use for connecting
-            to instance.
-        creds: Credentials to get OAuth2 access token from, needed for IAM service
-            account authentication to DB.
-
-    Returns:
-        A database connection pool instance.
-    """
-    # config for service account DB user
-    db_user = service_account_email
-    db_pass = str(creds.token)
-    db_name = ""
-    db_socket_dir = os.environ.get("DB_SOCKET_DIR", "/cloudsql")
-
-    pool = create_async_engine(
-        # Equivalent URL:
-        # mysql+pymysql://<db_user>:<db_pass>@/<db_name>?unix_socket=<socket_path>/<cloud_sql_instance_name>
-        sqlalchemy.engine.url.URL.create(
-            drivername="mysql+aiomysql",
-            username=db_user,  # e.g. "my-database-user"
-            password=db_pass,  # e.g. "my-database-password"
-            database=db_name,  # e.g. "my-database-name"
-            query={
-                "unix_socket": "{}/{}".format(
-                    db_socket_dir, instance_connection_name  # e.g. "/cloudsql"
-                )  # i.e "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>"
-            },
-        ),
-        **db_config,
-    )
+    # create connection pool
+    pool = sqlalchemy.create_engine("mysql+pymysql://", creator=connection, **db_config)
     return pool
 
 
-async def get_iam_users(user_service, groups):
+def get_iam_users(user_service, groups):
     """Get list of all IAM users within IAM groups.
 
     Given a list of IAM groups, get all IAM users that are members within one or
@@ -279,8 +241,7 @@ async def get_iam_users(user_service, groups):
         while group_queue:
             current_group = group_queue.pop(0)
             # get all members of current IAM group
-            members_partial = partial(user_service.get_group_members, current_group)
-            members = await run_sync(members_partial)()
+            members = user_service.get_group_members(current_group)
             # check if member is a group, otherwise they are a user
             for member in members:
                 if member["type"] == "GROUP":
@@ -397,7 +358,7 @@ class UserService:
         return
 
 
-async def get_instance_users(user_service, instance_connection_names):
+def get_instance_users(user_service, instance_connection_names):
     """Get users that belong to each Cloud SQL instance.
 
     Given a list of Cloud SQL instance names and a Google Cloud project, get a list
@@ -414,17 +375,15 @@ async def get_instance_users(user_service, instance_connection_names):
     # create dict to hold database users of each instance
     db_users = defaultdict(list)
     for connection_name in instance_connection_names:
-        get_users = partial(
-            user_service.get_db_users,
-            InstanceConnectionName(*connection_name.split(":")),
+        users = user_service.get_db_users(
+            InstanceConnectionName(*connection_name.split(":"))
         )
-        users = await run_sync(get_users)()
         for user in users:
             db_users[connection_name].append(user["name"])
     return db_users
 
 
-async def manage_instance_users(instance_connection_name, iam_users, creds):
+def manage_instance_users(instance_connection_name, iam_users, creds):
     """Function to manage database instance users.
 
     Manage DB users within database instance which includes: connect to instance,
@@ -439,13 +398,13 @@ async def manage_instance_users(instance_connection_name, iam_users, creds):
     """
     db = init_connection_engine(instance_connection_name, creds)
     # create connection to db instance
-    async with db.connect() as db_connection:
+    with db.connect() as db_connection:
         role_service = RoleService(db_connection)
-        await manage_user_roles(role_service, iam_users)
+        manage_user_roles(role_service, iam_users)
     return
 
 
-async def manage_user_roles(role_service, iam_users):
+def manage_user_roles(role_service, iam_users):
     """Manage group role permissions for DB users.
 
     Create, grant, revoke proper IAM group role permissions to database users.
@@ -454,21 +413,21 @@ async def manage_user_roles(role_service, iam_users):
         role_service: A RoleService class object for accessing grants in db.
         iam_users: Set containing all IAM users found within IAM groups.
     """
-    users_with_roles = await get_users_with_roles(role_service, iam_users.keys())
+    users_with_roles = get_users_with_roles(role_service, iam_users.keys())
     for group, users in iam_users.items():
         # mysql role does not need email part and can be truncated
         role = mysql_username(group)
         # truncate mysql_usernames
         mysql_usernames = [mysql_username(user) for user in users]
         # create or verify group role exists
-        await role_service.create_group_role(role)
+        role_service.create_group_role(role)
         # find DB users who are part of IAM group that need role granted to them
         users_to_grant = [
             username
             for username in mysql_usernames
             if username not in users_with_roles[role]
         ]
-        await role_service.grant_group_role(role, users_to_grant)
+        role_service.grant_group_role(role, users_to_grant)
         # get list of users who have group role but are not in IAM group
         users_to_revoke = [
             user_with_role
@@ -476,10 +435,10 @@ async def manage_user_roles(role_service, iam_users):
             if user_with_role not in mysql_usernames
         ]
         # revoke group role from users no longer in IAM group
-        await role_service.revoke_group_role(role, users_to_revoke)
+        role_service.revoke_group_role(role, users_to_revoke)
 
 
-async def get_users_with_roles(role_service, group_names):
+def get_users_with_roles(role_service, group_names):
     """Get mapping of group role grants on DB users.
 
     Args:
@@ -491,7 +450,7 @@ async def get_users_with_roles(role_service, group_names):
     role_grants = defaultdict(list)
     for group_name in group_names:
         group_name = mysql_username(group_name)
-        grants = await role_service.fetch_role_grants(group_name)
+        grants = role_service.fetch_role_grants(group_name)
         # loop through grants that are in tuple form (FROM_USER, TO_USER)
         for grant in grants:
             # filter into dict for easier access later
@@ -590,7 +549,7 @@ def sanity_check():
 
 
 @app.route("/run", methods=["GET"])
-async def run():
+def run():
     # read in config params
     sql_instances, iam_groups, admin_email = load_config("config.json")
     # grab default creds from cloud run service account
@@ -603,10 +562,10 @@ async def run():
     # create UserService object for API calls
     user_service = UserService(sql_creds, iam_creds)
 
-    iam_users, instance_users = await asyncio.gather(
-        get_iam_users(user_service, iam_groups),
-        get_instance_users(user_service, sql_instances),
-    )
+    iam_users, instance_users = get_iam_users(
+        user_service, iam_groups
+    ), get_instance_users(user_service, sql_instances)
+
     # get IAM users of each IAM group
     for group_name, user_list in iam_users.items():
         print(f"IAM Users in Group {group_name}: {user_list}")
@@ -625,9 +584,7 @@ async def run():
             )
 
     # for each instance manage users and group role permissions
-    instance_coroutines = [
+    for instance in sql_instances:
         manage_instance_users(instance, iam_users, sql_creds)
-        for instance in sql_instances
-    ]
-    await asyncio.gather(*instance_coroutines)
+
     return "IAM DB Groups Authn has run successfully!"
