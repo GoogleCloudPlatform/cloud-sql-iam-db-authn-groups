@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-from google.cloud.sql.connector.instance_connection_manager import IPTypes
+import asyncio
 from quart import Quart
+from quart.utils import run_sync
 import sqlalchemy
 import json
 from google.auth import default, iam
@@ -25,6 +25,8 @@ from googleapiclient.errors import HttpError
 from collections import defaultdict
 from typing import NamedTuple
 from google.cloud.sql.connector import connector
+from google.cloud.sql.connector.instance_connection_manager import IPTypes
+from functools import partial, wraps
 
 # URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
@@ -34,6 +36,20 @@ IAM_SCOPES = ["https://www.googleapis.com/auth/admin.directory.group.member.read
 SQL_SCOPES = ["https://www.googleapis.com/auth/sqlservice.admin"]
 
 app = Quart(__name__)
+
+def async_wrap(func):
+    """Wrapper function to turn synchronous functions into async functions.
+
+    Args:
+        func: Synchronous function to wrap.
+    """
+    @wraps(func)
+    async def run(*args, loop=None, executor=None, **kwargs):
+        if loop is None:
+            loop = asyncio.get_event_loop()
+        pfunc = partial(func, *args, **kwargs)
+        return await loop.run_in_executor(executor, pfunc)
+    return run 
 
 
 class InstanceConnectionName(NamedTuple):
@@ -61,6 +77,7 @@ class RoleService:
         """
         self.db = db
 
+    @async_wrap
     def fetch_role_grants(self, group_name):
         """Fetch mappings of group roles granted to DB users.
 
@@ -77,6 +94,7 @@ class RoleService:
         results = self.db.execute(stmt, {"group_name": group_name}).fetchall()
         return results
 
+    @async_wrap
     def create_group_role(self, group):
         """Verify or create DB role.
 
@@ -90,6 +108,7 @@ class RoleService:
         stmt = sqlalchemy.text("CREATE ROLE IF NOT EXISTS :role")
         self.db.execute(stmt, {"role": group})
 
+    @async_wrap
     def grant_group_role(self, role, users):
         """Grant DB group role to DB users.
 
@@ -104,6 +123,7 @@ class RoleService:
         for user in users:
             self.db.execute(stmt, {"role": role, "user": user})
 
+    @async_wrap
     def revoke_group_role(self, role, users):
         """Revoke DB group role to DB users.
 
@@ -225,7 +245,7 @@ def init_connection_engine(instance_connection_name, creds, ip_type=IPTypes.PUBL
     return pool
 
 
-def get_iam_users(user_service, groups):
+async def get_iam_users(user_service, groups):
     """Get list of all IAM users within IAM groups.
 
     Given a list of IAM groups, get all IAM users that are members within one or
@@ -249,7 +269,8 @@ def get_iam_users(user_service, groups):
         while group_queue:
             current_group = group_queue.pop(0)
             # get all members of current IAM group
-            members = user_service.get_group_members(current_group)
+            members_partial = partial(user_service.get_group_members, current_group)
+            members = await run_sync(members_partial)()            
             # check if member is a group, otherwise they are a user
             for member in members:
                 if member["type"] == "GROUP":
@@ -366,7 +387,7 @@ class UserService:
         return
 
 
-def get_instance_users(user_service, instance_connection_names):
+async def get_instance_users(user_service, instance_connection_names):
     """Get users that belong to each Cloud SQL instance.
 
     Given a list of Cloud SQL instance names and a Google Cloud project, get a list
@@ -383,15 +404,17 @@ def get_instance_users(user_service, instance_connection_names):
     # create dict to hold database users of each instance
     db_users = defaultdict(list)
     for connection_name in instance_connection_names:
-        users = user_service.get_db_users(
-            InstanceConnectionName(*connection_name.split(":"))
+        get_users = partial(
+            user_service.get_db_users,
+            InstanceConnectionName(*connection_name.split(":")),
         )
+        users = await run_sync(get_users)()
         for user in users:
             db_users[connection_name].append(user["name"])
     return db_users
 
 
-def manage_instance_users(
+async def manage_instance_users(
     instance_connection_name, iam_users, creds, ip_type=IPTypes.PUBLIC
 ):
     """Function to manage database instance users.
@@ -412,11 +435,11 @@ def manage_instance_users(
     # create connection to db instance
     with db.connect() as db_connection:
         role_service = RoleService(db_connection)
-        manage_user_roles(role_service, iam_users)
+        await manage_user_roles(role_service, iam_users)
     return
 
 
-def manage_user_roles(role_service, iam_users):
+async def manage_user_roles(role_service, iam_users):
     """Manage group role permissions for DB users.
 
     Create, grant, revoke proper IAM group role permissions to database users.
@@ -425,21 +448,21 @@ def manage_user_roles(role_service, iam_users):
         role_service: A RoleService class object for accessing grants in db.
         iam_users: Set containing all IAM users found within IAM groups.
     """
-    users_with_roles = get_users_with_roles(role_service, iam_users.keys())
+    users_with_roles = await get_users_with_roles(role_service, iam_users.keys())
     for group, users in iam_users.items():
         # mysql role does not need email part and can be truncated
         role = mysql_username(group)
         # truncate mysql_usernames
         mysql_usernames = [mysql_username(user) for user in users]
         # create or verify group role exists
-        role_service.create_group_role(role)
+        await role_service.create_group_role(role)
         # find DB users who are part of IAM group that need role granted to them
         users_to_grant = [
             username
             for username in mysql_usernames
             if username not in users_with_roles[role]
         ]
-        role_service.grant_group_role(role, users_to_grant)
+        await role_service.grant_group_role(role, users_to_grant)
         # get list of users who have group role but are not in IAM group
         users_to_revoke = [
             user_with_role
@@ -447,10 +470,10 @@ def manage_user_roles(role_service, iam_users):
             if user_with_role not in mysql_usernames
         ]
         # revoke group role from users no longer in IAM group
-        role_service.revoke_group_role(role, users_to_revoke)
+        await role_service.revoke_group_role(role, users_to_revoke)
 
 
-def get_users_with_roles(role_service, group_names):
+async def get_users_with_roles(role_service, group_names):
     """Get mapping of group role grants on DB users.
 
     Args:
@@ -462,7 +485,7 @@ def get_users_with_roles(role_service, group_names):
     role_grants = defaultdict(list)
     for group_name in group_names:
         group_name = mysql_username(group_name)
-        grants = role_service.fetch_role_grants(group_name)
+        grants = await role_service.fetch_role_grants(group_name)
         # loop through grants that are in tuple form (FROM_USER, TO_USER)
         for grant in grants:
             # filter into dict for easier access later
@@ -561,7 +584,7 @@ def sanity_check():
 
 
 @app.route("/run", methods=["GET"])
-def run():
+async def run():
     # read in config params
     sql_instances, iam_groups, admin_email, private_ip = load_config("config.json")
     # grab default creds from cloud run service account
@@ -574,9 +597,10 @@ def run():
     # create UserService object for API calls
     user_service = UserService(sql_creds, iam_creds)
 
-    iam_users, instance_users = get_iam_users(
-        user_service, iam_groups
-    ), get_instance_users(user_service, sql_instances)
+    iam_users, instance_users = await asyncio.gather(
+        get_iam_users(user_service, iam_groups),
+        get_instance_users(user_service, sql_instances),
+    )
 
     # get IAM users of each IAM group
     for group_name, user_list in iam_users.items():
@@ -599,7 +623,10 @@ def run():
     ip_type = IPTypes.PRIVATE if private_ip else IPTypes.PUBLIC
 
     # for each instance manage users and group role permissions
-    for instance in sql_instances:
+    instance_coroutines = [
         manage_instance_users(instance, iam_users, sql_creds, ip_type)
+        for instance in sql_instances
+    ]
+    await asyncio.gather(*instance_coroutines)
 
     return "IAM DB Groups Authn has run successfully!"
