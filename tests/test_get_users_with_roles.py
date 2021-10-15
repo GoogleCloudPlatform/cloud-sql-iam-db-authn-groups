@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pytest
 from app import get_users_with_roles
 from collections import defaultdict
 
@@ -27,27 +28,29 @@ class FakeRoleService:
         """
         self.results = results
 
-    def fetch_role_grants(self, group_name):
+    async def fetch_role_grants(self, group_name):
         """Fake fetch_role_grants for testing"""
         return self.results[group_name]
 
 
-def test_single_group_role():
+@pytest.mark.asyncio
+async def test_single_group_role():
     """Test with single group role for happy path when multiples users are granted group role."""
     data = {"group": [("group", "user"), ("group", "user2"), ("group", "user3")]}
     role_service = FakeRoleService(data)
-    users_with_roles = get_users_with_roles(role_service, ["group@test.com"])
+    users_with_roles = await get_users_with_roles(role_service, ["group@test.com"])
     assert users_with_roles == {"group": ["user", "user2", "user3"]}
 
 
-def test_multiple_group_roles():
+@pytest.mark.asyncio
+async def test_multiple_group_roles():
     """Test with multiple group roles for happy path when multiples users are granted group role."""
     data = {
         "group": [("group", "user"), ("group", "user2")],
         "group2": [("group2", "user3"), ("group2", "user4")],
     }
     role_service = FakeRoleService(data)
-    users_with_roles = get_users_with_roles(
+    users_with_roles = await get_users_with_roles(
         role_service, ["group@test.com", "group2@test.com"]
     )
     assert users_with_roles == {
@@ -56,17 +59,19 @@ def test_multiple_group_roles():
     }
 
 
-def test_no_users_with_roles():
+@pytest.mark.asyncio
+async def test_no_users_with_roles():
     """Test with no users that have group roles granted to them.
 
     Should return empty defaultdict of type list"""
     data = defaultdict(list)
     role_service = FakeRoleService(data)
-    users_with_roles = get_users_with_roles(role_service, ["group@test.com"])
+    users_with_roles = await get_users_with_roles(role_service, ["group@test.com"])
     assert users_with_roles == defaultdict(list)
 
 
-def test_no_users_for_one_role():
+@pytest.mark.asyncio
+async def test_no_users_for_one_role():
     """Test multiple group roles where one role has no users with the grant.
 
     Should return only the roles with users that have grants"""
@@ -76,7 +81,7 @@ def test_no_users_for_one_role():
         "group3": [],
     }
     role_service = FakeRoleService(data)
-    users_with_roles = get_users_with_roles(
+    users_with_roles = await get_users_with_roles(
         role_service, ["group@test.com", "group2@test.com", "group3@test.com"]
     )
     assert users_with_roles == {

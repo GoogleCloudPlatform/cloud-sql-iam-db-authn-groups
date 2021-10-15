@@ -37,19 +37,22 @@ SQL_SCOPES = ["https://www.googleapis.com/auth/sqlservice.admin"]
 
 app = Quart(__name__)
 
+
 def async_wrap(func):
     """Wrapper function to turn synchronous functions into async functions.
 
     Args:
         func: Synchronous function to wrap.
     """
+
     @wraps(func)
     async def run(*args, loop=None, executor=None, **kwargs):
         if loop is None:
             loop = asyncio.get_event_loop()
         pfunc = partial(func, *args, **kwargs)
         return await loop.run_in_executor(executor, pfunc)
-    return run 
+
+    return run
 
 
 class InstanceConnectionName(NamedTuple):
@@ -270,7 +273,7 @@ async def get_iam_users(user_service, groups):
             current_group = group_queue.pop(0)
             # get all members of current IAM group
             members_partial = partial(user_service.get_group_members, current_group)
-            members = await run_sync(members_partial)()            
+            members = await run_sync(members_partial)()
             # check if member is a group, otherwise they are a user
             for member in members:
                 if member["type"] == "GROUP":
