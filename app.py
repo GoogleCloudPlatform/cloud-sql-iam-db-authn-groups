@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+from google.cloud.sql.connector.instance_connection_manager import IPTypes
 from quart import Quart
 import sqlalchemy
 import json
@@ -128,7 +129,8 @@ def load_config(filename="config.json"):
     {
         "sql_instances" : ["my-project:my-region:my-instance", "my-other-project:my-other-region:my-other-instance"],
         "iam_groups" : ["group@example.com", "othergroup@example.com"],
-        "admin_email" : "admin@example.com"
+        "admin_email" : "admin@example.com",
+        "private_ip" : false
     }
 
     Args:
@@ -139,6 +141,7 @@ def load_config(filename="config.json"):
         iam_groups: List of all IAM Groups to manage DB users of.
         admin_email: Email of user with proper admin privileges for Google Workspace, needed
             for calling Directory API to fetch IAM users within IAM groups.
+        private_ip: Boolean flag for private or public IP addresses.
     """
     with open(filename) as json_file:
         config = json.load(json_file)
@@ -146,6 +149,7 @@ def load_config(filename="config.json"):
     sql_instances = config["sql_instances"]
     iam_groups = config["iam_groups"]
     admin_email = config["admin_email"]
+    private_ip = config["private_ip"]
 
     # verify config params are not empty
     if sql_instances is None or sql_instances == []:
@@ -154,7 +158,9 @@ def load_config(filename="config.json"):
         raise ValueError(build_error_message("iam_groups"))
     if admin_email is None or admin_email == "":
         raise ValueError(build_error_message("admin_email"))
-    return sql_instances, iam_groups, admin_email
+    if private_ip is None:
+        raise ValueError(build_error_message("private_ip"))
+    return sql_instances, iam_groups, admin_email, private_ip
 
 
 def build_error_message(var_name):
@@ -172,13 +178,13 @@ def build_error_message(var_name):
         '"my-project:my-region:my-instance",'
         ' "my-other-project:my-other-region:my-other-instance"],\n "iam_groups" : '
         '["group@example.com", "othergroup@example.com"],\n "admin_email" : '
-        '"admin@example.com"\n}\n\nYour configuration is '
+        '"admin@example.com"\n "private_ip" : false\n}\n\nYour configuration is '
         f"missing the `{var_name}` key."
     )
     return message
 
 
-def init_connection_engine(instance_connection_name, creds):
+def init_connection_engine(instance_connection_name, creds, ip_type=IPTypes.PUBLIC):
     """Configure and initialize database connection pool.
 
     Configures the parameters for the database connection pool. Initiliazes the
@@ -189,7 +195,8 @@ def init_connection_engine(instance_connection_name, creds):
             (e.g. "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>")
         creds: Credentials to get OAuth2 access token from, needed for IAM service
             account authentication to DB.
-
+        ip_type: IP address type for instance connection.
+            (IPTypes.PUBLIC or IPTypes.PRIVATE)
     Returns:
         A database connection pool instance.
     """
@@ -206,6 +213,7 @@ def init_connection_engine(instance_connection_name, creds):
     connection = lambda: connector.connect(
         instance_connection_name,
         "pymysql",
+        ip_types=ip_type,
         user=service_account_email,
         password=str(creds.token),
         db="",
@@ -383,7 +391,9 @@ def get_instance_users(user_service, instance_connection_names):
     return db_users
 
 
-def manage_instance_users(instance_connection_name, iam_users, creds):
+def manage_instance_users(
+    instance_connection_name, iam_users, creds, ip_type=IPTypes.PUBLIC
+):
     """Function to manage database instance users.
 
     Manage DB users within database instance which includes: connect to instance,
@@ -395,8 +405,10 @@ def manage_instance_users(instance_connection_name, iam_users, creds):
             (e.g. "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>")
         iam_users: Set containing all IAM users found within IAM groups.
         creds: OAuth2 credentials with SQL scopes applied.
+        ip_type: IP address type for instance connection.
+            (IPTypes.PUBLIC or IPTypes.PRIVATE)
     """
-    db = init_connection_engine(instance_connection_name, creds)
+    db = init_connection_engine(instance_connection_name, creds, ip_type)
     # create connection to db instance
     with db.connect() as db_connection:
         role_service = RoleService(db_connection)
@@ -551,7 +563,7 @@ def sanity_check():
 @app.route("/run", methods=["GET"])
 def run():
     # read in config params
-    sql_instances, iam_groups, admin_email = load_config("config.json")
+    sql_instances, iam_groups, admin_email, private_ip = load_config("config.json")
     # grab default creds from cloud run service account
     creds, project = default()
     # update default credentials with IAM SCOPE and domain delegation
@@ -583,8 +595,11 @@ def run():
                 user, InstanceConnectionName(*instance.split(":"))
             )
 
+    # set ip_type to proper type for connector
+    ip_type = IPTypes.PRIVATE if private_ip else IPTypes.PUBLIC
+
     # for each instance manage users and group role permissions
     for instance in sql_instances:
-        manage_instance_users(instance, iam_users, sql_creds)
+        manage_instance_users(instance, iam_users, sql_creds, ip_type)
 
     return "IAM DB Groups Authn has run successfully!"
