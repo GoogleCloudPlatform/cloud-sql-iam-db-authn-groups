@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pytest
 from app import get_iam_users
 
 
@@ -38,7 +39,8 @@ class FakeUserService:
         return self.members[group]
 
 
-def test_single_group():
+@pytest.mark.asyncio
+async def test_single_group():
     """Test for happy path of single IAM group when all members are type USER."""
     data = {
         "test-group@test.com": [
@@ -48,13 +50,14 @@ def test_single_group():
         ]
     }
     fake_service = FakeUserService(data)
-    iam_users = get_iam_users(fake_service, groups=["test-group@test.com"])
+    iam_users = await get_iam_users(fake_service, groups=["test-group@test.com"])
     assert iam_users == {
         "test-group@test.com": set(("test@test.com", "user@test.com", "john@abc.com"))
     }
 
 
-def test_multiple_groups():
+@pytest.mark.asyncio
+async def test_multiple_groups():
     """Test happy path for multiple IAM groups.
 
     Should retunr all members of type `USER` and skip the one `CUSTOMER`.
@@ -72,7 +75,7 @@ def test_multiple_groups():
         ],
     }
     fake_service = FakeUserService(data)
-    iam_users = get_iam_users(
+    iam_users = await get_iam_users(
         fake_service, groups=["test-group@test.com", "test-group2@abc.com"]
     )
     assert iam_users == {
@@ -81,7 +84,8 @@ def test_multiple_groups():
     }
 
 
-def test_group_within_group():
+@pytest.mark.asyncio
+async def test_group_within_group():
     """Test for one group, where the group has a nested group within.
 
     Should return the users of both the main group and the nested group as members of the main group.
@@ -97,13 +101,14 @@ def test_group_within_group():
         ],
     }
     fake_service = FakeUserService(data)
-    iam_users = get_iam_users(fake_service, groups=["test-group3@xyz.com"])
+    iam_users = await get_iam_users(fake_service, groups=["test-group3@xyz.com"])
     assert iam_users == {
         "test-group3@xyz.com": set(("test@test.com", "jack@test.com", "jane@xyz.com"))
     }
 
 
-def test_empty_group():
+@pytest.mark.asyncio
+async def test_empty_group():
     """Test for group with no users.
 
     Should return empty dict as it will skip group with no users.
@@ -112,11 +117,12 @@ def test_empty_group():
         "empty-group@test.com": [],
     }
     fake_service = FakeUserService(data)
-    iam_users = get_iam_users(fake_service, groups=["empty-group@test.com"])
+    iam_users = await get_iam_users(fake_service, groups=["empty-group@test.com"])
     assert iam_users == {}
 
 
-def test_customer_group():
+@pytest.mark.asyncio
+async def test_customer_group():
     """Test for group with no members of type `USER` and all type `CUSTOMER`.
 
     Should return empty dict as it will skip all members of type `CUSTOMER`.
@@ -128,11 +134,12 @@ def test_customer_group():
         ],
     }
     fake_service = FakeUserService(data)
-    iam_users = get_iam_users(fake_service, groups=["customer-group@test.com"])
+    iam_users = await get_iam_users(fake_service, groups=["customer-group@test.com"])
     assert iam_users == {}
 
 
-def test_group_loop():
+@pytest.mark.asyncio
+async def test_group_loop():
     """Test group that has infinite loop of nested groups.
 
     Should return members of the main group and nested group without duplications.
@@ -149,7 +156,7 @@ def test_group_loop():
         ],
     }
     fake_service = FakeUserService(data)
-    iam_users = get_iam_users(fake_service, groups=["test-group3@xyz.com"])
+    iam_users = await get_iam_users(fake_service, groups=["test-group3@xyz.com"])
     assert iam_users == {
         "test-group3@xyz.com": set(("test@test.com", "jack@test.com", "jane@xyz.com"))
     }
