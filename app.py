@@ -13,10 +13,9 @@
 # limitations under the License.
 
 import asyncio
-from quart import Quart
+from quart import Quart, request, jsonify
 from quart.utils import run_sync
 import sqlalchemy
-import json
 from google.auth import default, iam
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
@@ -142,13 +141,11 @@ class RoleService:
             self.db.execute(stmt, {"role": role, "user": user})
 
 
-def load_config(filename="config.json"):
-    """Load in params from json config file.
+def load_config(body):
+    """Load in params from JSON body.
 
-    Loading in configurable parameters for service which are Cloud SQL Instance
-    names and IAM Group names.
-
-    Example config file:
+    Loading in configurable parameters for service which are passed in through JSON body.
+    Example request body:
     {
         "sql_instances" : ["my-project:my-region:my-instance", "my-other-project:my-other-region:my-other-instance"],
         "iam_groups" : ["group@example.com", "othergroup@example.com"],
@@ -157,7 +154,7 @@ def load_config(filename="config.json"):
     }
 
     Args:
-        filename: The name of the configurable json file.
+        body: JSON request body.
 
     Returns:
         sql_instances: List of all Cloud SQL instances to configure.
@@ -166,16 +163,14 @@ def load_config(filename="config.json"):
             for calling Directory API to fetch IAM users within IAM groups.
         private_ip (optional): Boolean flag for private or public IP addresses.
     """
-    with open(filename) as json_file:
-        config = json.load(json_file)
 
-    sql_instances = config["sql_instances"]
-    iam_groups = config["iam_groups"]
-    admin_email = config["admin_email"]
+    sql_instances = body["sql_instances"]
+    iam_groups = body["iam_groups"]
+    admin_email = body["admin_email"]
 
     # try reading in private_ip param, default to False
     try:
-        private_ip = config["private_ip"]
+        private_ip = body["private_ip"]
     except:
         private_ip = False
 
@@ -591,10 +586,11 @@ def sanity_check():
     return "App is running!"
 
 
-@app.route("/run", methods=["GET"])
+@app.route("/run", methods=["POST"])
 async def run():
+    body = await request.get_json()
     # read in config params
-    sql_instances, iam_groups, admin_email, private_ip = load_config("config.json")
+    sql_instances, iam_groups, admin_email, private_ip = load_config(body)
     # grab default creds from cloud run service account
     creds, project = default()
     # update default credentials with IAM SCOPE and domain delegation
@@ -637,4 +633,6 @@ async def run():
     ]
     await asyncio.gather(*instance_coroutines)
 
-    return "IAM DB Groups Authn has run successfully!"
+    return jsonify(
+        {"status": "200", "message": "IAM DB Groups Authn has run successfully!"}
+    )
