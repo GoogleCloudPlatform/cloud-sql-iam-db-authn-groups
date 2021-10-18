@@ -586,8 +586,8 @@ def sanity_check():
     return "App is running!"
 
 
-@app.route("/run", methods=["POST"])
-async def run():
+@app.route("/iam-db-groups", methods=["POST"])
+async def run_groups_authn():
     body = await request.get_json(force=True)
     # read in config params
     sql_instances, iam_groups, admin_email, private_ip = load_config(body)
