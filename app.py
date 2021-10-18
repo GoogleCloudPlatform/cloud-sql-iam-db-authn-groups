@@ -588,7 +588,7 @@ def sanity_check():
 
 @app.route("/run", methods=["POST"])
 async def run():
-    body = await request.get_json()
+    body = await request.get_json(force=True)
     # read in config params
     sql_instances, iam_groups, admin_email, private_ip = load_config(body)
     # grab default creds from cloud run service account
