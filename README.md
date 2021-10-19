@@ -99,6 +99,11 @@ Replace the following values:
 - `PROJECT_ID`: The Google Cloud project ID.
 
 ### Domain Wide Delegation
+To properly allow read-access of an organization's IAM group members (i.e. which IAM users belong within a specific IAM group) within the service, we need to enable [Domain-Wide Delegation](https://developers.google.com/admin-sdk/directory/v1/guides/delegation) for the service account created above. This will allow the service account to properly call the [List Members Discovery API](https://developers.google.com/admin-sdk/directory/reference/rest/v1/members/list) to keep track of the IAM members being managed through this service. Enable Domain-Wide Delegation for the service account created above by following the steps found here, [Enable Domain-Wide Delegation for Service Account](https://developers.google.com/admin-sdk/directory/v1/guides/delegation) starting at "**To enable Google Workspace domain-wide delegation...**" and continue until "**Step 6: Authorize**".
+
+When prompted for OAuth Scopes, give the following scope, **`https://www.googleapis.com/auth/admin.directory.group.member.readonly`** to allow strictly read-only access of IAM group members.
+
+**Note:** An Admin user will be needed for enabling Domain-Wide Delegation for the service account. Keep track of the email address for the admin user who granted the access, it will be needed during a configuration step later on.
 
 ### Cloud SQL Instances
 This service requires Cloud SQL instances to be already created and to have the `cloudsql_iam_authentication` flag turned **On**. [(How to enable flag)](https://cloud.google.com/sql/docs/mysql/create-edit-iam-instances)
@@ -134,7 +139,7 @@ Replace the following values:
 You should now successfully have a Cloud Run service deployed under the name `iam-db-authn-groups`. The service URL should be outputted from the `gcloud` command above but can also be found in the [Cloud Console](https://console.cloud.google.com/run).
 
 ## Configuring Cloud Scheduler
-Cloud Scheduler will now be used to invoke our Cloud Run service on a timely interval and constantly sync the Cloud SQL instance database users and appropriate database permissions with the given IAM groups. Cloud Scheduler is used to manage and configure multiple mappings between different **Cloud SQL Instances** and **IAM groups** while only needing a single Cloud Run service.
+Cloud Scheduler can be used to invoke the Cloud Run service on a timely interval and constantly sync the Cloud SQL instance database users and appropriate database permissions with the given IAM groups. Cloud Scheduler is used to manage and configure multiple mappings between different **Cloud SQL Instances** and **IAM groups** while only needing a single Cloud Run service (for public IP connections).
 
 An example command creating a Cloud Scheduler job to run the IAM database authentication service for IAM groups and Cloud SQL instances can be seen below.
 
@@ -149,3 +154,36 @@ gcloud scheduler jobs create http \
     --message-body="{"iam-groups": ["group@test.com", "group2@test.com"], "sql_instances": ["project:region:instance", "project:region:instance2], "admin_email": "user@test.com", "private_ip": false}"
 
 ```
+
+Replace the following values:
+- `JOB_NAME`: The name for the Cloud Scheduler job.
+- `SERVICE_URL`: The service URL of the Cloud Run service.
+- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account.
+- `PROJECT_ID`: The Google Cloud project ID.
+- The values for `iam-groups`, `sql_instances`, `admin_email`, and `private_ip`(optional param) within `--message-body`.
+
+The `--schedule` flag is what controls how often the Cloud Scheduler job will trigger the Cloud Run service endpoint. It is currently defaulted to `*/10 * * * *` which will cause it to trigger every 10 minutes. See [Configuring Cron Job Schedules](https://cloud.google.com/scheduler/docs/configuring/cron-job-schedules) on how to format the schedule for different time intervals or [Cron Guru](https://crontab.guru/) to play around with schedule formats.
+
+The body for the POST request to the Cloud Run service can also be configured for Cloud Scheduler through a JSON file by switching out the `--message-body` flag for the flag `--message-body-from-file` where the value is set to the file path of a JSON file with the proper params.
+
+An example JSON config file would look like the following.
+
+```
+{
+    "iam_groups": ["group@test.com, "group2@test.com],
+    "sql_instances": ["project:region:instance"],
+    "admin_email": "admin_user@test.com,
+    "private_ip": false
+}
+```
+
+Where:
+- **sql_instances**: List of all Cloud SQL instances to configure.
+- **iam_groups**: List of all IAM Groups to manage DB users of.
+- **admin_email**: Email of user with proper admin privileges for Google Workspace, needed
+    for calling Directory API to fetch IAM users within IAM groups.
+- **private_ip** (optional): Boolean flag for private or public IP addresses.
+
+**Note:** These are placeholder values and should be replaces with proper IAM groups, Cloud SQL instance connection names, and admin email address.
+
+To learn more about the different Cloud Scheduler flags, read the [official documentation](https://cloud.google.com/sdk/gcloud/reference/scheduler/jobs/create/http).
