@@ -46,7 +46,7 @@ This service requires enabling the following Cloud APIs for a successful deploym
  - [Serverless VPC Access API](https://console.cloud.google.com/apis/api/vpcaccess.googleapis.com)
  - [Service Networking API](https://console.cloud.google.com/apis/api/servicenetworking.googleapis.com/overview)
 
- The above Services and APIs can be manually enabled or enabled all at once by running one of the below commands.
+ The above APIs and Services can be manually enabled through [APIs and Services](https://console.cloud.google.com/apis/dashboard) in the cloud console or enabled all at once by running one of the below commands.
 
  Enable APIs for use during the service:
 
@@ -54,10 +54,10 @@ This service requires enabling the following Cloud APIs for a successful deploym
  gcloud services enable run.googleapis.com cloudscheduler.googleapis.com cloudbuild.googleapis.com sqladmin.googleapis.com admin.googleapis.com iamcredentials.googleapis.com
  ```
 
- Enable additional APIs if service needs connect to **Private IP** Cloud SQL instances:
+ Enable additional APIs if service needs connections to **Private IP** Cloud SQL instances:
 
  ```
- gcloud services enable run.googleapis.com cloudscheduler.googleapis.com cloudbuild.googleapis.com sqladmin.googleapis.com admin.googleapis.com iamcredentials.googleapis.com vpcaccess.googleapis.com servicenetworking.googleapis.com
+ gcloud services enable vpcaccess.googleapis.com servicenetworking.googleapis.com
  ```
 
  ### Service Account
@@ -136,7 +136,7 @@ Once connected, grant the service account IAM database user the following permis
 
 Allow the service account to read database users and their roles.
 ```
-GRANT SELECT ON mysql.role_edges TO `SERVICE_ACCOUNT_ID`;I
+GRANT SELECT ON mysql.role_edges TO 'SERVICE_ACCOUNT_ID';I
 ```
 
 Allow the service account to **CREATE** group roles for IAM groups if they are missing.
@@ -144,12 +144,12 @@ Allow the service account to **CREATE** group roles for IAM groups if they are m
 GRANT CREATE ROLE ON *.* TO 'SERVICE_ACCOUNT_ID';
 ```
 
-Allow the service account to GRANT/REVOKE roles to users through being a **ROLE_ADMIN**.
+Allow the service account to **GRANT/REVOKE** roles to users through being a **ROLE_ADMIN**.
 ```
 GRANT ROLE_ADMIN ON *.* TO 'SERVICE_ACCOUNT_ID';
 ```
 Replace the following values in the above commands:
-`SERVICE_ACCOUNT_ID`: The ID (name) for the service account (everything before the **@** portion of email)
+- `SERVICE_ACCOUNT_ID`: The ID (name) for the service account (everything before the **@** portion of email)
 ## Deploying Cloud Run Service
 To build and deploy the service using Cloud Run, run the following commands.
 
@@ -224,6 +224,6 @@ Where:
     for calling Directory API to fetch IAM users within IAM groups.
 - **private_ip** (optional): Boolean flag for private or public IP addresses.
 
-**Note:** These are placeholder values and should be replaces with proper IAM groups, Cloud SQL instance connection names, and admin email address.
+**Note:** These are placeholder values and should be replaced with proper IAM groups, Cloud SQL instance connection names, and admin email address.
 
 To learn more about the different Cloud Scheduler flags, read the [official documentation](https://cloud.google.com/sdk/gcloud/reference/scheduler/jobs/create/http).
