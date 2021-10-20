@@ -48,13 +48,13 @@ This service requires enabling the following Cloud APIs for a successful deploym
 
  The above Services and APIs can be manually enabled or enabled all at once by running one of the below commands.
 
- Enable APIs **without** use of Private IP Cloud SQL instances:
+ Enable APIs for use during the service:
 
  ```
  gcloud services enable run.googleapis.com cloudscheduler.googleapis.com cloudbuild.googleapis.com sqladmin.googleapis.com admin.googleapis.com iamcredentials.googleapis.com
  ```
 
- Enable APIs **with** use of Private IP Cloud SQL instances:
+ Enable additional APIs if service needs connect to **Private IP** Cloud SQL instances:
 
  ```
  gcloud services enable run.googleapis.com cloudscheduler.googleapis.com cloudbuild.googleapis.com sqladmin.googleapis.com admin.googleapis.com iamcredentials.googleapis.com vpcaccess.googleapis.com servicenetworking.googleapis.com
@@ -70,7 +70,6 @@ gcloud iam service-accounts create SERVICE_ACCOUNT_ID \
     --description="IAM Groups Authn Service Account" \
     --display-name="IAM Database Groups Authentication"
 ```
-
 Replace the following values:
 - `SERVICE_ACCOUNT_ID`: The ID (name) for the service account.
 
@@ -93,21 +92,64 @@ gcloud projects add-iam-policy-binding PROJECT_ID \
     --member="serviceAccount:SERVICE_ACCOUNT_ID@PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/run.invoker"
 ```
-
 Replace the following values:
 - `SERVICE_ACCOUNT_ID`: The ID (name) for the service account.
 - `PROJECT_ID`: The Google Cloud project ID.
 
 ### Domain Wide Delegation
-To properly allow read-access of an organization's IAM group members (i.e. which IAM users belong within a specific IAM group) within the service, we need to enable [Domain-Wide Delegation](https://developers.google.com/admin-sdk/directory/v1/guides/delegation) for the service account created above. This will allow the service account to properly call the [List Members Discovery API](https://developers.google.com/admin-sdk/directory/reference/rest/v1/members/list) to keep track of the IAM members being managed through this service. Enable Domain-Wide Delegation for the service account created above by following the steps found here, [Enable Domain-Wide Delegation for Service Account](https://developers.google.com/admin-sdk/directory/v1/guides/delegation) starting at "**To enable Google Workspace domain-wide delegation...**" and continue until "**Step 6: Authorize**".
+To properly allow read-access of an organization's IAM group members (i.e. which IAM users belong within a specific IAM group) within the service, we need to enable [Domain-Wide Delegation](https://developers.google.com/admin-sdk/directory/v1/guides/delegation) for the service account created above. This will allow the service account to properly call the [List Members Discovery API](https://developers.google.com/admin-sdk/directory/reference/rest/v1/members/list) to keep track of the IAM members being managed through this service. Enable Domain-Wide Delegation for the [service account](https://console.developers.google.com/iam-admin/serviceaccounts) created above by following the steps found here, [Enable Domain-Wide Delegation for Service Account](https://developers.google.com/admin-sdk/directory/v1/guides/delegation) starting at "**To enable Google Workspace domain-wide delegation...**" and continue until "**Step 6: Authorize**".
 
 When prompted for OAuth Scopes, give the following scope, **`https://www.googleapis.com/auth/admin.directory.group.member.readonly`** to allow strictly read-only access of IAM group members.
 
-**Note:** An Admin user will be needed for enabling Domain-Wide Delegation for the service account. Keep track of the email address for the admin user who granted the access, it will be needed during a configuration step later on.
+**Note:** An Admin user will be needed for enabling Domain-Wide Delegation for the service account. **Keep track of the email address** for the admin user who granted the access, it will be needed during a configuration step later on.
 
 ### Cloud SQL Instances
 This service requires Cloud SQL instances to be already created and to have the `cloudsql_iam_authentication` flag turned **On**. [(How to enable flag)](https://cloud.google.com/sql/docs/mysql/create-edit-iam-instances)
 
+To properly manage the database users on each Cloud SQL instance that is configured with the service, the service needs to GRANT/REVOKE database users the proper role(s) corresponding to their IAM group(s). This is achieved by creating an IAM database authenticated service account user on each instance using the service account previously created. This will allow the service account to authenticate to the instance(s) during the Cloud Run service through the [Cloud SQL Python Connector](https://github.com/GoogleCloudPlatform/cloud-sql-python-connector).
+
+Add the service account as an IAM authenticated database user on each Cloud SQL instance that needs managing through IAM groups. Can be done both manually through the Google Cloud Console or through the following `gcloud` command.
+
+```
+gcloud sql users create SERVICE_ACCOUNT_EMAIL \
+--instance=INSTANCE_NAME \
+--type=cloud_iam_service_account
+```
+Replace the following values:
+- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account.
+- `INSTANCE_NAME`: The name of a Cloud SQL instance.
+
+#### Granting Database Permissions to IAM Service Account Instance User
+For the service to run smoothly it needs the IAM service account database user to be granted several permissions on all Cloud SQL instances that the user was added to above. This allows for the service to read usernames of other database users and GRANT/REVOKE the group role(s) appropriately.
+
+Connect to all Cloud SQL instances in question with the **root** user or as another users with appropriate permissions for the following commands. Connecting to the Cloud SQL instance can be done many different ways. ([Cloud Shell](https://cloud.google.com/sql/docs/mysql/quickstart#connect), [Cloud SQL Connector](https://cloud.google.com/sql/docs/mysql/connect-connectors#python), [Cloud SQL Auth Proxy](https://cloud.google.com/sql/docs/mysql/quickstart-proxy-test#install-proxy), [Private IP Proxy](https://cloud.google.com/sql/docs/mysql/quickstart-private-ip), etc)
+
+ Below is an example `gcloud` command to connect to a Cloud SQL instance as `root` user through [Cloud Shell](https://cloud.google.com/sql/docs/mysql/quickstart#connect).
+
+ ```
+ gcloud sql connect INSTANCE_NAME --user=root
+ ```
+ Replace the following values:
+- `INSTANCE_NAME`: The name of a Cloud SQL instance.
+
+Once connected, grant the service account IAM database user the following permissions:
+
+Allow the service account to read database users and their roles.
+```
+GRANT SELECT ON mysql.role_edges TO `SERVICE_ACCOUNT_ID`;I
+```
+
+Allow the service account to **CREATE** group roles for IAM groups if they are missing.
+```
+GRANT CREATE ROLE ON *.* TO 'SERVICE_ACCOUNT_ID';
+```
+
+Allow the service account to GRANT/REVOKE roles to users through being a **ROLE_ADMIN**.
+```
+GRANT ROLE_ADMIN ON *.* TO 'SERVICE_ACCOUNT_ID';
+```
+Replace the following values in the above commands:
+`SERVICE_ACCOUNT_ID`: The ID (name) for the service account (everything before the **@** portion of email)
 ## Deploying Cloud Run Service
 To build and deploy the service using Cloud Run, run the following commands.
 
@@ -118,7 +160,6 @@ gcloud builds submit \
   --tag gcr.io/PROJECT_ID/iam-db-authn-groups \
   --project PROJECT_ID
 ```
-
 Replace the following values:
 - `PROJECT_ID`: The Google Cloud project ID.
 
@@ -149,12 +190,11 @@ gcloud scheduler jobs create http \
     --schedule="*/10 * * * *" \
     --uri="SERVICE_URL/iam-db-groups" \
     --oidc-service-account-email SERVICE_ACCOUNT_EMAIL \
-    --http-method=POST \
+    --http-method=PUT \
     --headers="Content-Type: application/json" \
     --message-body="{"iam-groups": ["group@test.com", "group2@test.com"], "sql_instances": ["project:region:instance", "project:region:instance2], "admin_email": "user@test.com", "private_ip": false}"
 
 ```
-
 Replace the following values:
 - `JOB_NAME`: The name for the Cloud Scheduler job.
 - `SERVICE_URL`: The service URL of the Cloud Run service.
