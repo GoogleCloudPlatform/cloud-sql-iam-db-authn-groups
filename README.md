@@ -1,12 +1,13 @@
 # Cloud SQL IAM Database Authentication for Groups
 **Note:** This is not an officially supported Google product.
 
-A self-deployed service that provides support for managing [Cloud SQL IAM Database Authentication](https://cloud.google.com/sql/docs/mysql/authentication) for groups. This service leverages [Cloud Run](https://cloud.google.com/run), [Cloud Scheduler](https://cloud.google.com/scheduler), and the [Cloud SQL Python Connector](https://github.com/googlecloudplatform/cloud-sql-python-connector) to consistently update and manage Cloud SQL database users based on IAM groups. It automatically creates missing database users and can grant/revoke proper database permissions to all member's of an IAM group at once.
+A self-deployed service that provides support for managing [Cloud SQL IAM Database Authentication](https://cloud.google.com/sql/docs/mysql/authentication) for groups. This service leverages [Cloud Run](https://cloud.google.com/run), [Cloud Scheduler](https://cloud.google.com/scheduler), and the [Cloud SQL Python Connector](https://github.com/googlecloudplatform/cloud-sql-python-connector) to consistently update and sync Cloud SQL instances based on IAM groups. It can create missing database IAM users, GRANT roles to database IAM users based on their IAM groups, and REVOKE roles from database IAM users no longer in IAM groups.
 
 ## Supported Databases
 Currently only **MySQL 8.0** databases are supported.
 
 ## Overview of Service
+The Cloud SQL IAM Database Authentication for Groups service at an overview is made of Cloud Scheduler Job(s) and Cloud Run instance(s). The Cloud Scheduler Job(s) are configured to run on the interval of your choosing (every 10 mins, 1 hour, daily etc.) When ran, the Cloud Scheduler calls the IAM Database Authentication for Groups Cloud Run service, passing in the configured request body from scheduler, which contains parameters that tell the service which IAM groups and which Cloud SQL instances to sync and manage. The Cloud Run service calls the required Google APIs to get a snapshot of the current IAM group(s) members and the current Cloud SQL instance(s) database users, it then adds any new IAM members who have been added to the IAM group since the last sync as a IAM database user on the corresponding Cloud SQL instances. The Cloud Run service then also verifies or creates a database role within each configured database for each configured IAM group. Mapping each IAM group to a database role, the service can then GRANT/REVOKE this group role with the appropriate database permissions for the IAM group to all the proper IAM database users who are missing it or should not have it based on the members of the IAM group.
 
 ## Initial Setup for Service
 There are a few initial setups steps to get the service ready and grant it the permissions needed in order to successfully operate. However, after this setup is complete, minimal configuration is needed in the future.
@@ -188,7 +189,7 @@ An example command creating a Cloud Scheduler job to run the IAM database authen
 gcloud scheduler jobs create http \
     JOB_NAME \
     --schedule="*/10 * * * *" \
-    --uri="SERVICE_URL/iam-db-groups" \
+    --uri="SERVICE_URL/run" \
     --oidc-service-account-email SERVICE_ACCOUNT_EMAIL \
     --http-method=PUT \
     --headers="Content-Type: application/json" \
