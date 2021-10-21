@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import asyncio
-from quart import Quart, request, jsonify
+from quart import Quart, request
 from quart.utils import run_sync
 import sqlalchemy
 from google.auth import default, iam
@@ -139,74 +139,6 @@ class RoleService:
         stmt = sqlalchemy.text("REVOKE :role FROM :user")
         for user in users:
             self.db.execute(stmt, {"role": role, "user": user})
-
-
-def load_config(body):
-    """Load in params from JSON body.
-
-    Loading in configurable parameters for service which are passed in through JSON body.
-    Example request body:
-    {
-        "sql_instances" : ["my-project:my-region:my-instance", "my-other-project:my-other-region:my-other-instance"],
-        "iam_groups" : ["group@example.com", "othergroup@example.com"],
-        "admin_email" : "admin@example.com",
-        "private_ip" : false
-    }
-
-    Args:
-        body: JSON request body.
-
-    Returns:
-        sql_instances: List of all Cloud SQL instances to configure.
-        iam_groups: List of all IAM Groups to manage DB users of.
-        admin_email: Email of user with proper admin privileges for Google Workspace, needed
-            for calling Directory API to fetch IAM users within IAM groups.
-        private_ip (optional): Boolean flag for private or public IP addresses.
-    """
-    # try reading in required request parameters and verify type, otherwise throw custom error
-    try:
-        sql_instances = body["sql_instances"]
-    except:
-        raise BadRequestError(
-            "Missing required request parameter `sql_instances`, please try request again with the parameter."
-        )
-    if type(sql_instances) is not list:
-        raise BadRequestError(
-            f"One or more request parameter has invalid type. Parameter `sql_instances` should be of type `list`, got {type(sql_instances)}."
-        )
-
-    try:
-        iam_groups = body["iam_groups"]
-    except:
-        raise BadRequestError(
-            "Missing required request parameter `iam_groups`, please try request again with the parameter."
-        )
-    if type(iam_groups) is not list:
-        raise BadRequestError(
-            f"One or more request parameter has invalid type. Parameter `iam_groups` should be of type `list`, got {type(iam_groups)}."
-        )
-
-    try:
-        admin_email = body["admin_email"]
-    except:
-        raise BadRequestError(
-            "Missing required request parameter `admin_email`, please try request again with the parameter."
-        )
-    if type(admin_email) is not str:
-        raise BadRequestError(
-            f"One or more request parameter has invalid type. Parameter `admin_email` should be of type `str`, got {type(admin_email)}."
-        )
-
-    # try reading in private_ip param, default to False
-    try:
-        private_ip = body["private_ip"]
-    except:
-        private_ip = False
-    if type(private_ip) is not bool:
-        raise BadRequestError(
-            f"One or more request parameter has invalid type. Parameter `private_ip` should be of type `bool`, got {type(private_ip)}."
-        )
-    return sql_instances, iam_groups, admin_email, private_ip
 
 
 def init_connection_engine(instance_connection_name, creds, ip_type=IPTypes.PUBLIC):
@@ -583,33 +515,44 @@ def mysql_username(iam_email):
     return username
 
 
-class BadRequestError(Exception):
-    """Custom error handling for improperly formatted JSON requests."""
-
-    status_code = 400
-    error = "Bad Request"
-    message = "Improperly formatted request body. Please verify request JSON."
-
-
-@app.errorhandler(BadRequestError)
-def handle_exception(err):
-    response = {"Error": err.error, "Status": err.status_code, "Message": err.message}
-    # if custom message exists, swap message
-    if len(err.args) > 0:
-        response["Message"] = err.args[0]
-    return jsonify(response), err.status_code
-
-
 @app.route("/", methods=["GET"])
-def sanity_check():
+def health_check():
     return "App is running!"
 
 
-@app.route("/iam-db-groups", methods=["PUT"])
+@app.route("/run", methods=["PUT"])
 async def run_groups_authn():
     body = await request.get_json(force=True)
-    # read in request body
-    sql_instances, iam_groups, admin_email, private_ip = load_config(body)
+    # try reading in required request parameters and verify type, otherwise throw custom error
+    sql_instances = body.get("sql_instances")
+    if sql_instances is None or type(sql_instances) is not list:
+        return {
+            "Error": "Bad Request",
+            "Message": "Missing or incorrect type for required request parameter: `sql_instances`",
+        }, 400
+
+    iam_groups = body.get("iam_groups")
+    if iam_groups is None or type(iam_groups) is not list:
+        return {
+            "Error": "Bad Request",
+            "Message": "Missing or incorrect type for required request parameter: `iam_groups`",
+        }, 400
+
+    admin_email = body.get("admin_email")
+    if admin_email is None or type(admin_email) is not str:
+        return {
+            "Error": "Bad Request",
+            "Message": "Missing or incorrect type for required request parameter: `admin_email`",
+        }, 400
+
+    # try reading in private_ip param, default to False
+    private_ip = body.get("private_ip", False)
+    if type(private_ip) is not bool:
+        return {
+            "Error": "Bad Request",
+            "Message": "Incorrect type for request parameter: `private_ip`",
+        }, 400
+
     # grab default creds from cloud run service account
     creds, project = default()
     # update default credentials with IAM SCOPE and domain delegation
@@ -652,12 +595,4 @@ async def run_groups_authn():
     ]
     await asyncio.gather(*instance_coroutines)
 
-    return (
-        jsonify(
-            {
-                "Status": "200",
-                "Message": "IAM DB Groups Authn service has run successfully!",
-            }
-        ),
-        200,
-    )
+    return "Sync successful.", 200
