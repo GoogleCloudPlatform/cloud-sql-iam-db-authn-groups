@@ -13,10 +13,9 @@
 # limitations under the License.
 
 import asyncio
-from quart import Quart
+from quart import Quart, request
 from quart.utils import run_sync
 import sqlalchemy
-import json
 from google.auth import default, iam
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
@@ -140,76 +139,6 @@ class RoleService:
         stmt = sqlalchemy.text("REVOKE :role FROM :user")
         for user in users:
             self.db.execute(stmt, {"role": role, "user": user})
-
-
-def load_config(filename="config.json"):
-    """Load in params from json config file.
-
-    Loading in configurable parameters for service which are Cloud SQL Instance
-    names and IAM Group names.
-
-    Example config file:
-    {
-        "sql_instances" : ["my-project:my-region:my-instance", "my-other-project:my-other-region:my-other-instance"],
-        "iam_groups" : ["group@example.com", "othergroup@example.com"],
-        "admin_email" : "admin@example.com",
-        "private_ip" : false
-    }
-
-    Args:
-        filename: The name of the configurable json file.
-
-    Returns:
-        sql_instances: List of all Cloud SQL instances to configure.
-        iam_groups: List of all IAM Groups to manage DB users of.
-        admin_email: Email of user with proper admin privileges for Google Workspace, needed
-            for calling Directory API to fetch IAM users within IAM groups.
-        private_ip (optional): Boolean flag for private or public IP addresses.
-    """
-    with open(filename) as json_file:
-        config = json.load(json_file)
-
-    sql_instances = config["sql_instances"]
-    iam_groups = config["iam_groups"]
-    admin_email = config["admin_email"]
-
-    # try reading in private_ip param, default to False
-    try:
-        private_ip = config["private_ip"]
-    except:
-        private_ip = False
-
-    # verify config params are not empty
-    if sql_instances is None or sql_instances == []:
-        raise ValueError(build_error_message("sql_instances"))
-    if iam_groups is None or iam_groups == []:
-        raise ValueError(build_error_message("iam_groups"))
-    if admin_email is None or admin_email == "":
-        raise ValueError(build_error_message("admin_email"))
-    if private_ip is None or type(private_ip) != bool:
-        raise ValueError(build_error_message("private_ip"))
-    return sql_instances, iam_groups, admin_email, private_ip
-
-
-def build_error_message(var_name):
-    """Function to help build error messages for missing config variables.
-
-    Args:
-        var_name: String of variable name that is missing in config.
-
-    Returns:
-        message: Constructed error message to be outputted.
-    """
-    message = (
-        f"\nNo valid {var_name} configured, please verify your config.json.\n"
-        '\nValid configuration should look like:\n\n{\n "sql_instances" : ['
-        '"my-project:my-region:my-instance",'
-        ' "my-other-project:my-other-region:my-other-instance"],\n "iam_groups" : '
-        '["group@example.com", "othergroup@example.com"],\n "admin_email" : '
-        '"admin@example.com"\n "private_ip" : false\n}\n\nYour configuration is '
-        f"missing the `{var_name}` key."
-    )
-    return message
 
 
 def init_connection_engine(instance_connection_name, creds, ip_type=IPTypes.PUBLIC):
@@ -587,14 +516,43 @@ def mysql_username(iam_email):
 
 
 @app.route("/", methods=["GET"])
-def sanity_check():
+def health_check():
     return "App is running!"
 
 
-@app.route("/run", methods=["GET"])
-async def run():
-    # read in config params
-    sql_instances, iam_groups, admin_email, private_ip = load_config("config.json")
+@app.route("/run", methods=["PUT"])
+async def run_groups_authn():
+    body = await request.get_json(force=True)
+    # try reading in required request parameters and verify type, otherwise throw custom error
+    sql_instances = body.get("sql_instances")
+    if sql_instances is None or type(sql_instances) is not list:
+        return (
+            "Missing or incorrect type for required request parameter: `sql_instances`",
+            400,
+        )
+
+    iam_groups = body.get("iam_groups")
+    if iam_groups is None or type(iam_groups) is not list:
+        return (
+            "Missing or incorrect type for required request parameter: `iam_groups`",
+            400,
+        )
+
+    admin_email = body.get("admin_email")
+    if admin_email is None or type(admin_email) is not str:
+        return (
+            "Missing or incorrect type for required request parameter: `admin_email`",
+            400,
+        )
+
+    # try reading in private_ip param, default to False
+    private_ip = body.get("private_ip", False)
+    if type(private_ip) is not bool:
+        return (
+            "Incorrect type for request parameter: `private_ip`, should be boolean.",
+            400,
+        )
+
     # grab default creds from cloud run service account
     creds, project = default()
     # update default credentials with IAM SCOPE and domain delegation
@@ -637,4 +595,4 @@ async def run():
     ]
     await asyncio.gather(*instance_coroutines)
 
-    return "IAM DB Groups Authn has run successfully!"
+    return "Sync successful.", 200
