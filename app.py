@@ -163,48 +163,50 @@ def load_config(body):
             for calling Directory API to fetch IAM users within IAM groups.
         private_ip (optional): Boolean flag for private or public IP addresses.
     """
+    # try reading in required request parameters and verify type, otherwise throw custom error
+    try:
+        sql_instances = body["sql_instances"]
+    except:
+        raise BadRequestError(
+            "Missing required request parameter `sql_instances`, please try request again with the parameter."
+        )
+    if type(sql_instances) is not list:
+        raise BadRequestError(
+            f"One or more request parameter has invalid type. Parameter `sql_instances` should be of type `list`, got {type(sql_instances)}."
+        )
 
-    sql_instances = body["sql_instances"]
-    iam_groups = body["iam_groups"]
-    admin_email = body["admin_email"]
+    try:
+        iam_groups = body["iam_groups"]
+    except:
+        raise BadRequestError(
+            "Missing required request parameter `iam_groups`, please try request again with the parameter."
+        )
+    if type(iam_groups) is not list:
+        raise BadRequestError(
+            f"One or more request parameter has invalid type. Parameter `iam_groups` should be of type `list`, got {type(iam_groups)}."
+        )
+
+    try:
+        admin_email = body["admin_email"]
+    except:
+        raise BadRequestError(
+            "Missing required request parameter `admin_email`, please try request again with the parameter."
+        )
+    if type(admin_email) is not str:
+        raise BadRequestError(
+            f"One or more request parameter has invalid type. Parameter `admin_email` should be of type `str`, got {type(admin_email)}."
+        )
 
     # try reading in private_ip param, default to False
     try:
         private_ip = body["private_ip"]
     except:
         private_ip = False
-
-    # verify config params are not empty
-    if sql_instances is None or sql_instances == []:
-        raise ValueError(build_error_message("sql_instances"))
-    if iam_groups is None or iam_groups == []:
-        raise ValueError(build_error_message("iam_groups"))
-    if admin_email is None or admin_email == "":
-        raise ValueError(build_error_message("admin_email"))
-    if private_ip is None or type(private_ip) != bool:
-        raise ValueError(build_error_message("private_ip"))
+    if type(private_ip) is not bool:
+        raise BadRequestError(
+            f"One or more request parameter has invalid type. Parameter `private_ip` should be of type `bool`, got {type(private_ip)}."
+        )
     return sql_instances, iam_groups, admin_email, private_ip
-
-
-def build_error_message(var_name):
-    """Function to help build error messages for missing config variables.
-
-    Args:
-        var_name: String of variable name that is missing in config.
-
-    Returns:
-        message: Constructed error message to be outputted.
-    """
-    message = (
-        f"\nNo valid {var_name} configured, please verify your config.json.\n"
-        '\nValid configuration should look like:\n\n{\n "sql_instances" : ['
-        '"my-project:my-region:my-instance",'
-        ' "my-other-project:my-other-region:my-other-instance"],\n "iam_groups" : '
-        '["group@example.com", "othergroup@example.com"],\n "admin_email" : '
-        '"admin@example.com"\n "private_ip" : false\n}\n\nYour configuration is '
-        f"missing the `{var_name}` key."
-    )
-    return message
 
 
 def init_connection_engine(instance_connection_name, creds, ip_type=IPTypes.PUBLIC):
@@ -581,15 +583,32 @@ def mysql_username(iam_email):
     return username
 
 
+class BadRequestError(Exception):
+    """Custom error handling for improperly formatted JSON requests."""
+
+    status_code = 400
+    error = "Bad Request"
+    message = "Improperly formatted request body. Please verify request JSON."
+
+
+@app.errorhandler(BadRequestError)
+def handle_exception(err):
+    response = {"Error": err.error, "Status": err.status_code, "Message": err.message}
+    # if custom message exists, swap message
+    if len(err.args) > 0:
+        response["Message"] = err.args[0]
+    return jsonify(response), err.status_code
+
+
 @app.route("/", methods=["GET"])
 def sanity_check():
     return "App is running!"
 
 
-@app.route("/iam-db-groups", methods=["POST"])
+@app.route("/iam-db-groups", methods=["PUT"])
 async def run_groups_authn():
     body = await request.get_json(force=True)
-    # read in config params
+    # read in request body
     sql_instances, iam_groups, admin_email, private_ip = load_config(body)
     # grab default creds from cloud run service account
     creds, project = default()
@@ -633,6 +652,12 @@ async def run_groups_authn():
     ]
     await asyncio.gather(*instance_coroutines)
 
-    return jsonify(
-        {"status": "200", "message": "IAM DB Groups Authn has run successfully!"}
+    return (
+        jsonify(
+            {
+                "Status": "200",
+                "Message": "IAM DB Groups Authn service has run successfully!",
+            }
+        ),
+        200,
     )
