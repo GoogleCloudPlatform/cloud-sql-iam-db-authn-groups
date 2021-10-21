@@ -7,7 +7,11 @@ A self-deployed service that provides support for managing [Cloud SQL IAM Databa
 Currently only **MySQL 8.0** databases are supported.
 
 ## Overview of Service
-The Cloud SQL IAM Database Authentication for Groups service at an overview is made of Cloud Scheduler Job(s) and Cloud Run instance(s). The Cloud Scheduler Job(s) are configured to run on the interval of your choosing (every 10 mins, 1 hour, daily etc.) When ran, the Cloud Scheduler calls the IAM Database Authentication for Groups Cloud Run service, passing in the configured request body from scheduler, which contains parameters that tell the service which IAM groups and which Cloud SQL instances to sync and manage. The Cloud Run service calls the required Google APIs to get a snapshot of the current IAM group(s) members and the current Cloud SQL instance(s) database users, it then adds any new IAM members who have been added to the IAM group since the last sync as a IAM database user on the corresponding Cloud SQL instances. The Cloud Run service then also verifies or creates a database role within each configured database for each configured IAM group. Mapping each IAM group to a database role, the service can then GRANT/REVOKE this group role with the appropriate database permissions for the IAM group to all the proper IAM database users who are missing it or should not have it based on the members of the IAM group.
+The Cloud SQL IAM Database Authentication for Groups service at an overview is made of Cloud Scheduler Job(s) and Cloud Run instance(s). 
+
+The Cloud Scheduler Job(s) are configured to run on the interval of your choosing (every 10 mins, 1 hour, daily etc.) When ran, the Cloud Scheduler calls the IAM Database Authentication for Groups Cloud Run service, passing in the configured request body from scheduler, which contains parameters that tell the service which IAM groups and which Cloud SQL instances to sync and manage. 
+
+The Cloud Run service calls the required Google APIs to get a snapshot of the current IAM group(s) members and the current Cloud SQL instance(s) database users, it then adds any new IAM members who have been added to the IAM group since the last sync as an IAM database user on the corresponding Cloud SQL instances. The Cloud Run service then also verifies or creates a database role within each configured database for each configured IAM group. Mapping each IAM group to a database role, the service can then GRANT/REVOKE this group role with the appropriate database permissions for the IAM group to all the proper IAM database users who are missing it or should not have it based on the members of the IAM group.
 
 ## Initial Setup for Service
 There are a few initial setups steps to get the service ready and grant it the permissions needed in order to successfully operate. However, after this setup is complete, minimal configuration is needed in the future.
@@ -123,7 +127,9 @@ Replace the following values:
 #### Granting Database Permissions to IAM Service Account Instance User
 For the service to run smoothly it needs the IAM service account database user to be granted several permissions on all Cloud SQL instances that the user was added to above. This allows for the service to read usernames of other database users and GRANT/REVOKE the group role(s) appropriately.
 
-Connect to all Cloud SQL instances in question with the **root** user or as another users with appropriate permissions for the following commands. Connecting to the Cloud SQL instance can be done many different ways. ([Cloud Shell](https://cloud.google.com/sql/docs/mysql/quickstart#connect), [Cloud SQL Connector](https://cloud.google.com/sql/docs/mysql/connect-connectors#python), [Cloud SQL Auth Proxy](https://cloud.google.com/sql/docs/mysql/quickstart-proxy-test#install-proxy), [Private IP Proxy](https://cloud.google.com/sql/docs/mysql/quickstart-private-ip), etc)
+Connect to all Cloud SQL instances in question with the **root** user or as another user with appropriate permissions for the following commands. 
+
+Connecting to a Cloud SQL instance can be done many different ways. ([Cloud Shell](https://cloud.google.com/sql/docs/mysql/quickstart#connect), [Cloud SQL Connector](https://cloud.google.com/sql/docs/mysql/connect-connectors#python), [Cloud SQL Auth Proxy](https://cloud.google.com/sql/docs/mysql/quickstart-proxy-test#install-proxy), [Private IP Proxy](https://cloud.google.com/sql/docs/mysql/quickstart-private-ip), etc)
 
  Below is an example `gcloud` command to connect to a Cloud SQL instance as `root` user through [Cloud Shell](https://cloud.google.com/sql/docs/mysql/quickstart#connect).
 
@@ -132,6 +138,8 @@ Connect to all Cloud SQL instances in question with the **root** user or as anot
  ```
  Replace the following values:
 - `INSTANCE_NAME`: The name of a Cloud SQL instance.
+
+Enter password for `root` user when prompted.
 
 Once connected, grant the service account IAM database user the following permissions:
 
@@ -222,9 +230,26 @@ Where:
 - **sql_instances**: List of all Cloud SQL instances to configure.
 - **iam_groups**: List of all IAM Groups to manage DB users of.
 - **admin_email**: Email of user with proper admin privileges for Google Workspace, needed
-    for calling Directory API to fetch IAM users within IAM groups.
+    for calling Directory API to fetch IAM users within IAM groups. **FROM DOMAIN_WIDE DELEGATION SECTION**
 - **private_ip** (optional): Boolean flag for private or public IP addresses.
 
 **Note:** These are placeholder values and should be replaced with proper IAM groups, Cloud SQL instance connection names, and admin email address.
 
 To learn more about the different Cloud Scheduler flags, read the [official documentation](https://cloud.google.com/sdk/gcloud/reference/scheduler/jobs/create/http).
+
+
+## Running Service with Private IP Cloud SQL Connections
+This service does work for Private IP database connections however, there are some additional configurations needed and some limitations to mention.
+
+To run this service with Private IP, first make sure all Cloud SQL instances that are going to be connected to have a Private IP address configured. ([Configure Private IP for Cloud SQL](https://cloud.google.com/sql/docs/mysql/configure-private-ip))
+
+Private IP Cloud SQL instance(s) should be connected to a [VPC Network](https://cloud.google.com/vpc/docs/using-vpc) which can be accessed securely via Cloud Run using [Serverless VPC Access](https://console.cloud.google.com/networking/connectors) which creates a VPC Connector.
+
+Thie VPC Connector can be attached to the Cloud Run service previously created to allow Private IP connections to the Cloud SQL instances on the **same VPC Network**.
+
+Update the Cloud Run service with a VPC Connector:
+```
+gcloud run services update iam-db-authn-groups --vpc-connector CONNECTOR_NAME
+```
+Replace the following values:
+- `CONNECTOR_NAME`: The name for the VPC Connector on the same VPC network as Cloud SQL instance(s) with Private IP addresses.
