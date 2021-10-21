@@ -526,32 +526,32 @@ async def run_groups_authn():
     # try reading in required request parameters and verify type, otherwise throw custom error
     sql_instances = body.get("sql_instances")
     if sql_instances is None or type(sql_instances) is not list:
-        return {
-            "Error": "Bad Request",
-            "Message": "Missing or incorrect type for required request parameter: `sql_instances`",
-        }, 400
+        return (
+            "Missing or incorrect type for required request parameter: `sql_instances`",
+            400,
+        )
 
     iam_groups = body.get("iam_groups")
     if iam_groups is None or type(iam_groups) is not list:
-        return {
-            "Error": "Bad Request",
-            "Message": "Missing or incorrect type for required request parameter: `iam_groups`",
-        }, 400
+        return (
+            "Missing or incorrect type for required request parameter: `iam_groups`",
+            400,
+        )
 
     admin_email = body.get("admin_email")
     if admin_email is None or type(admin_email) is not str:
-        return {
-            "Error": "Bad Request",
-            "Message": "Missing or incorrect type for required request parameter: `admin_email`",
-        }, 400
+        return (
+            "Missing or incorrect type for required request parameter: `admin_email`",
+            400,
+        )
 
     # try reading in private_ip param, default to False
     private_ip = body.get("private_ip", False)
     if type(private_ip) is not bool:
-        return {
-            "Error": "Bad Request",
-            "Message": "Incorrect type for request parameter: `private_ip`",
-        }, 400
+        return (
+            "Incorrect type for request parameter: `private_ip`, should be boolean.",
+            400,
+        )
 
     # grab default creds from cloud run service account
     creds, project = default()
