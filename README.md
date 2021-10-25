@@ -9,9 +9,13 @@ Currently only **MySQL 8.0** databases are supported.
 ## Overview of Service
 The Cloud SQL IAM Database Authentication for Groups service at an overview is made of Cloud Scheduler Job(s) and Cloud Run instance(s). 
 
-The Cloud Scheduler Job(s) are configured to run on the interval of your choosing (every 10 mins, 1 hour, daily etc.) When ran, the Cloud Scheduler calls the IAM Database Authentication for Groups Cloud Run service, passing in the configured request body from scheduler, which contains parameters that tell the service which IAM groups and which Cloud SQL instances to sync and manage. 
+The Cloud Scheduler Job(s) are configured to run on the interval of your choosing (every 10 mins, 1 hour, daily etc.) When ran, the Cloud Scheduler calls the IAM Database Authentication for Groups Cloud Run service, passing in the configured request body from the scheduler, which contains parameters that tell the service which IAM groups and which Cloud SQL instances to sync and manage. 
+
+<p align="center"><img src="images/basic_architecture.png" width="640"></p>
 
 The Cloud Run service calls the required Google APIs to get a snapshot of the current IAM group(s) members and the current Cloud SQL instance(s) database users, it then adds any new IAM members who have been added to the IAM group since the last sync as an IAM database user on the corresponding Cloud SQL instances. The Cloud Run service then also verifies or creates a database role within each configured database for each configured IAM group. Mapping each IAM group to a database role, the service can then GRANT/REVOKE this group role with the appropriate database permissions for the IAM group to all the proper IAM database users who are missing it or should not have it based on the members of the IAM group.
+
+<p align="center"><img src="images/service_overview.png" width="640"></p>
 
 ## Initial Setup for Service
 There are a few initial setups steps to get the service ready and grant it the permissions needed in order to successfully operate. However, after this setup is complete, minimal configuration is needed in the future.
@@ -111,6 +115,19 @@ When prompted for OAuth Scopes, give the following scope, **`https://www.googlea
 ### Cloud SQL Instances
 This service requires Cloud SQL instances to be already created and to have the `cloudsql_iam_authentication` flag turned **On**. [(How to enable flag)](https://cloud.google.com/sql/docs/mysql/create-edit-iam-instances)
 
+#### IAM Group to Database Role Mapping
+The Cloud Run service maps the permissions that each IAM group and its IAM members should have on each Cloud SQL instance through a [database role](https://dev.mysql.com/doc/refman/8.0/en/roles.html). This database role is then granted to the proper database users that belong to the IAM group, giving them the appropriate database privileges on the Cloud SQL database instances for the IAM group.
+
+Each IAM group that is being managed through the service will need a corresponding database role on each Cloud SQL instance configured to properly grant permissions to IAM database users. 
+
+The name of the IAM group database role **MUST BE** the email of the IAM group without everything after and including the **@** sign of the IAM group email. 
+(Ex. IAM group with email "example-group@test.com", would have a database role "example-group" on each Cloud SQL instance it is configured with.)
+
+The Cloud Run service verifies that a group role exists or creates one on the database if it does not exist. It is recommended that a Database Administrator or project admin create the group roles on each Cloud SQL instance and GRANT the group roles the appropriate privileges to be inherited by database users of those IAM groups prior to running the service. This will allow a more smooth service, because if the Cloud Run service is required to create the group roles, it will create them without the proper privileges (blank roles) and in doing so any IAM database users granted the group role will also not get the proper privileges.
+
+**NOTE:** It is up to a Database Administrator or project admin to configure the proper privileges on each group role. The Cloud Run service will then be able to grant or revoke each group role with privileges to the proper database users.
+
+#### IAM Service Account Instance User
 To properly manage the database users on each Cloud SQL instance that is configured with the service, the service needs to GRANT/REVOKE database users the proper role(s) corresponding to their IAM group(s). This is achieved by creating an IAM database authenticated service account user on each instance using the service account previously created. This will allow the service account to authenticate to the instance(s) during the Cloud Run service through the [Cloud SQL Python Connector](https://github.com/GoogleCloudPlatform/cloud-sql-python-connector).
 
 Add the service account as an IAM authenticated database user on each Cloud SQL instance that needs managing through IAM groups. Can be done both manually through the Google Cloud Console or through the following `gcloud` command.
@@ -252,4 +269,20 @@ Update the Cloud Run service with a VPC Connector:
 gcloud run services update iam-db-authn-groups --vpc-connector CONNECTOR_NAME
 ```
 Replace the following values:
-- `CONNECTOR_NAME`: The name for the VPC Connector on the same VPC network as Cloud SQL instance(s) with Private IP addresses.
+- `CONNECTOR_NAME`: The name for the VPC Connector on the same VPC network as the Cloud SQL instance(s) with Private IP addresses.
+
+**NOTE:** Private IP connections require that the Cloud SQL instance and the Cloud Run service be connected to the same VPC Network to work correctly.
+
+## Custom Configurations
+Multiple different Cloud Scheduler and Cloud Run configurations can be configured depending on the Cloud SQL instance to IAM Group mappings required along with the IP address types being used to connect to instances. 
+
+A Cloud Scheduler job maps which IAM group(s) and hence which IAM users to manage permissions for any given Cloud SQL instance(s). When configuring a Cloud Scheduler job, all IAM groups listed in the JSON body will be mapped to all Cloud SQL instances in the JSON body. Therefore, for custom configurations where certain IAM groups need to be mapped to one instance, and other IAM groups to a different Cloud SQL instance, the solution is to deploy multiple Cloud Scheduler jobs.
+
+<p align="center"><img src="images/custom_architecture.png" width="640"></p>
+
+A single Cloud Run service can be used for multiple Cloud Scheduler jobs across an organization's different Google Cloud projects as long as they allow Public IP connections.
+
+### Private IP Configurations
+**NOTE:** For custom configurations with Private IP connections, multiple Cloud Run services may be required. Since Private IP configurations require the Cloud Run service and Cloud SQL instances to be connected to the same VPC network, thus for different projects with different VPC networks, a different Cloud Run service will be needed for each.
+
+<p align="center"><img src="images/private_ip_architecture.png" width="640"></p>
