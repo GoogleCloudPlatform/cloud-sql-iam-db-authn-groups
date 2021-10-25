@@ -116,14 +116,16 @@ When prompted for OAuth Scopes, give the following scope, **`https://www.googlea
 This service requires Cloud SQL instances to be already created and to have the `cloudsql_iam_authentication` flag turned **On**. [(How to enable flag)](https://cloud.google.com/sql/docs/mysql/create-edit-iam-instances)
 
 #### IAM Group to Database Role Mapping
-The Cloud Run service maps the permissions that each IAM group and its IAM members should have on each Cloud SQL instance through a [database role](https://dev.mysql.com/doc/refman/8.0/en/roles.html). This database role is then granted to the proper database users that belong to the IAM group, giving them the appropriate database privileges on the Cloud SQL database instances for the IAM group.
+The Cloud Run service maps the permissions that each IAM group and its IAM members should have on each Cloud SQL instance through a [database role](https://dev.mysql.com/doc/refman/8.0/en/roles.html). This database role is then granted to the proper database users that belong to the IAM group, giving them the appropriate database privileges for the IAM group.
 
-Each IAM group that is being managed through the service will need a corresponding database role on each Cloud SQL instance configured to properly grant permissions to IAM database users. 
+Each IAM group that is being managed through the service will need a corresponding database role on **each** Cloud SQL instance configured to properly grant permissions to IAM database users. 
 
-The name of the IAM group database role **MUST BE** the email of the IAM group without everything after and including the **@** sign of the IAM group email. 
-(Ex. IAM group with email "example-group@test.com", would have a database role "example-group" on each Cloud SQL instance it is configured with.)
+The name of the IAM group database role **MUST BE** the email of the IAM group without everything after and including the **"@"** sign of the IAM group email. 
+(Ex. IAM group with email "example-group@test.com", would have a database role **"example-group"** on each Cloud SQL instance it is configured with.)
 
-The Cloud Run service verifies that a group role exists or creates one on the database if it does not exist. It is recommended that a Database Administrator or project admin create the group roles on each Cloud SQL instance and GRANT the group roles the appropriate privileges to be inherited by database users of those IAM groups prior to running the service. This will allow a more smooth service, because if the Cloud Run service is required to create the group roles, it will create them without the proper privileges (blank roles) and in doing so any IAM database users granted the group role will also not get the proper privileges.
+The Cloud Run service verifies that a group role exists or creates one on the database if it does not exist. It is recommended that a Database Administrator or project admin create the group roles on each Cloud SQL instance and GRANT the group roles the appropriate privileges to be inherited by database users of those IAM groups prior to running the service. 
+
+This will allow a more smooth service, because if the Cloud Run service is required to create the group roles, it will create them without the proper privileges (blank roles) and in doing so any IAM database users granted the group role will also not get the proper privileges.
 
 **NOTE:** It is up to a Database Administrator or project admin to configure the proper privileges on each group role. The Cloud Run service will then be able to grant or revoke each group role with privileges to the proper database users.
 
