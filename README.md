@@ -108,7 +108,7 @@ gcloud projects add-iam-policy-binding <PROJECT_ID> \
     --role="roles/run.invoker"
 ```
 
-### Domain Wide Delegation
+### Domain-Wide Delegation
 To properly allow read-access of an organization's IAM group members (i.e. which IAM users belong within a specific IAM group) within the service, we need to enable [Domain-Wide Delegation](https://developers.google.com/admin-sdk/directory/v1/guides/delegation) for the service account created above. This will allow the service account to properly call the [List Members Discovery API](https://developers.google.com/admin-sdk/directory/reference/rest/v1/members/list) to keep track of the IAM members being managed through this service. Enable Domain-Wide Delegation for the [service account](https://console.developers.google.com/iam-admin/serviceaccounts) created above by following the steps found here, [Enable Domain-Wide Delegation for Service Account](https://developers.google.com/admin-sdk/directory/v1/guides/delegation) starting at "**To enable Google Workspace domain-wide delegation...**" and continue until "**Step 6: Authorize**".
 
 When prompted for OAuth Scopes, give the following scope, **`https://www.googleapis.com/auth/admin.directory.group.member.readonly`** to allow strictly read-only access of IAM group members.
@@ -157,12 +157,12 @@ Replace the following values in the above commands:
 - `SERVICE_ACCOUNT_ID`: The ID (name) for the service account (everything before the **@** portion of email)
 Allow the service account to read database users and their roles.
 ```
-GRANT SELECT ON mysql.role_edges TO 'SERVICE_ACCOUNT_ID';I
+GRANT SELECT ON mysql.role_edges TO '<SERVICE_ACCOUNT_ID>';I
 ```
 
 Allow the service account to **CREATE** group roles for IAM groups if they are missing.
 ```
-GRANT CREATE ROLE ON *.* TO 'SERVICE_ACCOUNT_ID';
+GRANT CREATE ROLE ON *.* TO '<SERVICE_ACCOUNT_ID>';
 ```
 
 Allow the service account to **GRANT/REVOKE** roles to users through being a **ROLE_ADMIN**.
