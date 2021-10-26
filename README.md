@@ -246,6 +246,7 @@ The name of the mapped IAM group database role is the email of the IAM group wit
 The service verifies that a group role exists or creates one on the database if it does not exist. It is recommended to configure the Cloud Scheduler job(s) and after having it triggered **atleast** once, have a Database Administrator or project admin verify the creation of the group roles and **GRANT** the group roles the appropriate privileges on each Cloud SQL instance that should be inherited by database users of those IAM groups on all consecutive Cloud Scheduler runs. 
 
 To verify the creation of group roles after Cloud Scheduler has triggered atleast once, the following command can be run:
+
 Replace the following values:
 - `INSTANCE_NAME`: The name of a Cloud SQL instance that was configured in the Cloud Scheduler JSON payload.
 ```
