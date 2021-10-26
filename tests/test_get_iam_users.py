@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import pytest
-from app import get_iam_users
+from iam_groups_authn.iam_admin import get_iam_users
 
 
 class FakeUserService:

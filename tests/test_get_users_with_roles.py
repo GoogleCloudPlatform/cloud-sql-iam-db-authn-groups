@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import pytest
-from app import get_users_with_roles
+from app.sql_admin import get_users_with_roles
 from collections import defaultdict
 
 # fake fetcher class using duck typing
