@@ -431,24 +431,22 @@ async def get_users_with_roles(role_service, group_names):
     return role_grants
 
 
-def delegated_credentials(creds, scopes, admin_user=None):
+def delegated_credentials(creds, scopes):
     """Update default credentials.
 
-    Based on scopes and domain delegation, update OAuth2 default credentials
+    Based on scopes, update OAuth2 default credentials
     accordingly.
 
     Args:
         creds: Default OAuth2 credentials.
         scopes: List of scopes for the credentials to limit access.
-        admin_user: Email of admin user, required for domain delegation credentials.
 
     Returns:
-        updated_credentials: Updated OAuth2 credentials with scopes and domain
-        delegation applied.
+        updated_credentials: Updated OAuth2 credentials with scopes applied.
     """
     try:
         # First try to update credentials using service account key file
-        updated_credentials = creds.with_subject(admin_user).with_scopes(scopes)
+        updated_credentials = creds.with_scopes(scopes)
         # if not valid refresh credentials
         if not updated_credentials.valid:
             request = Request()
@@ -460,7 +458,7 @@ def delegated_credentials(creds, scopes, admin_user=None):
         service_acccount_email = creds.service_account_email
         signer = iam.Signer(request, creds, service_acccount_email)
         updated_credentials = service_account.Credentials(
-            signer, service_acccount_email, TOKEN_URI, scopes=scopes, subject=admin_user
+            signer, service_acccount_email, TOKEN_URI, scopes=scopes
         )
         # if not valid, refresh credentials
         if not updated_credentials.valid:
@@ -538,13 +536,6 @@ async def run_groups_authn():
             400,
         )
 
-    admin_email = body.get("admin_email")
-    if admin_email is None or type(admin_email) is not str:
-        return (
-            "Missing or incorrect type for required request parameter: `admin_email`",
-            400,
-        )
-
     # try reading in private_ip param, default to False
     private_ip = body.get("private_ip", False)
     if type(private_ip) is not bool:
@@ -555,8 +546,8 @@ async def run_groups_authn():
 
     # grab default creds from cloud run service account
     creds, project = default()
-    # update default credentials with IAM SCOPE and domain delegation
-    iam_creds = delegated_credentials(creds, IAM_SCOPES, admin_email)
+    # update default credentials with IAM SCOPE
+    iam_creds = delegated_credentials(creds, IAM_SCOPES)
     # update default credentials with Cloud SQL scopes
     sql_creds = delegated_credentials(creds, SQL_SCOPES)
 
