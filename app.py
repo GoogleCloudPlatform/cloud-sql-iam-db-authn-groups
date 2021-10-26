@@ -431,7 +431,7 @@ async def get_users_with_roles(role_service, group_names):
     return role_grants
 
 
-def delegated_credentials(creds, scopes):
+def get_credentials(creds, scopes):
     """Update default credentials.
 
     Based on scopes, update OAuth2 default credentials
@@ -547,9 +547,9 @@ async def run_groups_authn():
     # grab default creds from cloud run service account
     creds, project = default()
     # update default credentials with IAM SCOPE
-    iam_creds = delegated_credentials(creds, IAM_SCOPES)
+    iam_creds = get_credentials(creds, IAM_SCOPES)
     # update default credentials with Cloud SQL scopes
-    sql_creds = delegated_credentials(creds, SQL_SCOPES)
+    sql_creds = get_credentials(creds, SQL_SCOPES)
 
     # create UserService object for API calls
     user_service = UserService(sql_creds, iam_creds)
