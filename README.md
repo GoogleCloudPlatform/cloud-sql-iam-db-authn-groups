@@ -69,9 +69,9 @@ This service requires enabling the following Cloud APIs for a successful deploym
  ```
 
 ### Creating the Service Account
-A service account must be created and granted the proper IAM roles in order for the service to have appropriate credentials and permissions to access APIs, IAM groups and database users.
+A service account must be created and granted the proper IAM permissions in order for the service to have appropriate credentials and permissions to access APIs, IAM groups and database users.
 
-The following commands will create a service account and grant it the proper IAM roles for the service to run successfully.
+The following commands will create a service account and grant it the proper IAM roles and permissions for the service to run successfully.
 
 Replace the following values:
 - `SERVICE_ACCOUNT_ID`: The ID (name) for the service account.
@@ -81,31 +81,33 @@ gcloud iam service-accounts create <SERVICE_ACCOUNT_ID> \
     --display-name="IAM Database Groups Authentication"
 ```
 
-Grant new service account the following IAM roles.
+Grant new service account the following IAM roles and permissions.
 
 Replace the following values:
 - `SERVICE_ACCOUNT_ID`: The ID (name) for the service account.
 - `PROJECT_ID`: The Google Cloud project ID.
-
-Cloud SQL Admin role for access to Cloud SQL Admin API to get database instance users.
-```
-gcloud projects add-iam-policy-binding <PROJECT_ID> \
-    --member="serviceAccount:<SERVICE_ACCOUNT_ID>@<PROJECT_ID>.iam.gserviceaccount.com" \
-    --role="roles/cloudsql.admin"
-```
-
-Service Account Token Creator role for ability to generate proper OAuth2 tokens on behalf of service account.
-```
-gcloud projects add-iam-policy-binding <PROJECT_ID> \
-    --member="serviceAccount:<SERVICE_ACCOUNT_ID>@<PROJECT_ID>.iam.gserviceaccount.com" \
-    --role="roles/iam.serviceAccountTokenCreator"
-```
 
 Cloud Run invoker role for service account to invoke Cloud Run and make authenticated calls from Cloud Scheduler.
 ```
 gcloud projects add-iam-policy-binding <PROJECT_ID> \
     --member="serviceAccount:<SERVICE_ACCOUNT_ID>@<PROJECT_ID>.iam.gserviceaccount.com" \
     --role="roles/run.invoker"
+```
+
+Create a custom IAM role with only permissions needed for service to run smoothly. Permissions include Cloud SQL permissions to access instances and database users, as well as a single IAM permission to generate proper OAuth2 credentials within service for accessing IAM group members.
+```
+gcloud iam roles create IamAuthnGroups \
+    --project=<PROJECT_ID> \
+    --title="IAM Groups Authn" \
+    --description="Custom role for IAM DB Authn for Groups Service" \
+    --permissions cloudsql.instances.connect,cloudsql.instances.get,cloudsql.instances.login,cloudsql.users.create,cloudsql.users.list,iam.serviceAccounts.signBlob
+```
+
+Now grant the custom IAM role to the service account.
+```
+gcloud projects add-iam-policy-binding <PROJECT_ID> \
+    --member="serviceAccount:<SERVICE_ACCOUNT_ID>@<PROJECT_ID>.iam.gserviceaccount.com" \
+    --role="projects/<PROJECT_ID>/roles/IamAuthnGroups"
 ```
 
 ### Assigning Group Administrator Role to Service Account
