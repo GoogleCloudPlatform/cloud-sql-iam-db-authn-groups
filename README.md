@@ -100,7 +100,7 @@ gcloud iam roles create IamAuthnGroups \
     --project=<PROJECT_ID> \
     --title="IAM Groups Authn" \
     --description="Custom role for IAM DB Authn for Groups Service" \
-    --permissions cloudsql.instances.connect,cloudsql.instances.get,cloudsql.instances.login,cloudsql.users.create,cloudsql.users.list,iam.serviceAccounts.signBlob
+    --permissions=cloudsql.instances.connect,cloudsql.instances.get,cloudsql.instances.login,cloudsql.users.create,cloudsql.users.list,iam.serviceAccounts.signBlob
 ```
 
 Now grant the custom IAM role to the service account.
