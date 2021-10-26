@@ -108,12 +108,10 @@ gcloud projects add-iam-policy-binding <PROJECT_ID> \
     --role="roles/run.invoker"
 ```
 
-### Domain-Wide Delegation
-To properly allow read-access of an organization's IAM group members (i.e. which IAM users belong within a specific IAM group) within the service, we need to enable [Domain-Wide Delegation](https://developers.google.com/admin-sdk/directory/v1/guides/delegation) for the service account created above. This will allow the service account to properly call the [List Members Discovery API](https://developers.google.com/admin-sdk/directory/reference/rest/v1/members/list) to keep track of the IAM members being managed through this service. Enable Domain-Wide Delegation for the [service account](https://console.developers.google.com/iam-admin/serviceaccounts) created above by following the steps found here, [Enable Domain-Wide Delegation for Service Account](https://developers.google.com/admin-sdk/directory/v1/guides/delegation) starting at "**To enable Google Workspace domain-wide delegation...**" and continue until "**Step 6: Authorize**".
+### Assigning Group Administrator Role to Service Account
+To properly allow read-access of an organization's IAM group members (i.e. which IAM users belong within a specific IAM group) within the service, we need to assign the Google Workspace Group Administrator Role to the service account created above. This will allow the service account to properly call the [List Members Discovery API](https://developers.google.com/admin-sdk/directory/reference/rest/v1/members/list) to keep track of the IAM members being managed through this service.
 
-When prompted for OAuth Scopes, give the following scope, **`https://www.googleapis.com/auth/admin.directory.group.member.readonly`** to allow strictly read-only access of IAM group members.
-
-**Note:** An Admin user will be needed for enabling Domain-Wide Delegation for the service account. **Keep track of the email address** for the admin user who granted the access, it will be needed during a configuration step later on.
+To assign the Group Administator Role to the service account follow these four quick steps. ([How to Assign Group Administrator Role](https://cloud.google.com/identity/docs/how-to/setup#auth-no-dwd))
 
 ### Configuring Cloud SQL Instances
 This service requires Cloud SQL instances to be already created and to have the `cloudsql_iam_authentication` flag turned **On**. [(See how to enable flag here.)](https://cloud.google.com/sql/docs/mysql/create-edit-iam-instances)
@@ -202,25 +200,22 @@ You should now successfully have a Cloud Run service deployed under the name `ia
 Cloud Scheduler can be used to invoke the Cloud Run service on a timely interval and constantly sync the Cloud SQL instance database users and appropriate database permissions with the given IAM groups. Cloud Scheduler is used to manage and configure multiple mappings between different **Cloud SQL Instances** and **IAM groups** while only needing a single Cloud Run service (for public IP connections).
 
 ### Configuring Your Payload
-Each Cloud Scheduler Job requires a JSON payload to tell it which IAM Groups and Cloud SQL instances to sync, which admin email to use for domain-wide delegation, and an optional flag to toggle between public or private IP database connections (defaults to public IP).
+Each Cloud Scheduler Job requires a JSON payload to tell it which IAM Groups and Cloud SQL instances to sync, and an optional flag to toggle between public or private IP database connections (defaults to public IP).
 
 An example JSON payload:
 ```
 {
     "iam_groups": ["group@test.com, "group2@test.com],
     "sql_instances": ["project:region:instance"],
-    "admin_email": "admin_user@test.com,
     "private_ip": false
 }
 ```
 Where:
 - **iam_groups**: List of all IAM Groups to manage IAM database users of.
 - **sql_instances**: List of all Cloud SQL instances to configure.
-- **admin_email**: Email of user with proper admin privileges for Google Workspace, needed
-    for calling Directory API to fetch IAM users within IAM groups. **FROM DOMAIN-WIDE DELEGATION SECTION**
 - **private_ip** (optional): Boolean flag for private or public IP addresses.
 
-**Note:** These are placeholder values and should be replaced with proper IAM groups, Cloud SQL instance connection names, and admin email address.
+**Note:** These are placeholder values and should be replaced with proper IAM groups and Cloud SQL instance connection names.
 
 It is recommended to save your JSON payload as a `.json` file (ex. "config.json").
 
@@ -249,7 +244,7 @@ The `--schedule` flag is what controls how often the Cloud Scheduler job will tr
 
 The payload for the PUT request to the Cloud Run service can also be configured for Cloud Scheduler directly through a command line flag by switching out the `--message-body-from-file` flag for the flag `--message-body` from the command above above as follows.
 ```
---message-body="{"iam-groups": ["group@test.com", "group2@test.com"], "sql_instances": ["project:region:instance"], "admin_email": "admin_user@test.com", "private_ip": false}"
+--message-body="{"iam-groups": ["group@test.com", "group2@test.com"], "sql_instances": ["project:region:instance"], "private_ip": false}"
 ```
 
 To learn more about the different Cloud Scheduler flags, read the [official documentation](https://cloud.google.com/sdk/gcloud/reference/scheduler/jobs/create/http).
