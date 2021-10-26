@@ -14,7 +14,7 @@
 
 from collections import defaultdict
 import pytest
-from app.sync import manage_user_roles
+from iam_groups_authn.sync import manage_user_roles
 
 
 class FakeRoleService:
