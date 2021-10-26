@@ -243,9 +243,9 @@ The Cloud Run service maps each IAM group configured in the JSON payload into a 
 The name of the mapped IAM group database role is the email of the IAM group without everything after and including the **"@"** sign of the IAM group email. 
 (Ex. IAM group with email "example-group@test.com", would map to a database role **"example-group"** on each Cloud SQL instance it is configured with.)
 
-The service verifies that a group role exists or creates one on the database if it does not exist. It is recommended to configure the Cloud Scheduler job(s) and after having it triggered **atleast** once, have a Database Administrator or project admin verify the creation of the group roles and **GRANT** the group roles the appropriate privileges on each Cloud SQL instance that should be inherited by database users of those IAM groups on all consecutive Cloud Scheduler runs. 
+The service verifies that a group role exists or creates one on the database if it does not exist. It is recommended to configure the Cloud Scheduler job(s) and after having it triggered **at least** once, have a Database Administrator or project admin verify the creation of the group roles and **GRANT** the group roles the appropriate privileges on each Cloud SQL instance that should be inherited by database users of those IAM groups on all consecutive Cloud Scheduler runs. 
 
-To verify the creation of group roles after Cloud Scheduler has triggered atleast once, the following command can be run:
+To verify the creation of group roles after Cloud Scheduler has triggered at least once, the following command can be run:
 
 Replace the following values:
 - `INSTANCE_NAME`: The name of a Cloud SQL instance that was configured in the Cloud Scheduler JSON payload.
