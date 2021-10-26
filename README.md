@@ -110,27 +110,13 @@ gcloud projects add-iam-policy-binding <PROJECT_ID> \
     --role="projects/<PROJECT_ID>/roles/IamAuthnGroups"
 ```
 
-### Assigning Group Administrator Role to Service Account
+#### Assigning Group Administrator Role to Service Account
 To properly allow read-access of an organization's IAM group members (i.e. which IAM users belong within a specific IAM group) within the service, we need to assign the Google Workspace Group Administrator Role to the service account created above. This will allow the service account to properly call the [List Members Discovery API](https://developers.google.com/admin-sdk/directory/reference/rest/v1/members/list) to keep track of the IAM members being managed through this service.
 
 To assign the Group Administator Role to the service account follow these four quick steps. ([How to Assign Group Administrator Role](https://cloud.google.com/identity/docs/how-to/setup#auth-no-dwd))
 
 ### Configuring Cloud SQL Instances
 This service requires Cloud SQL instances to be already created and to have the `cloudsql_iam_authentication` flag turned **On**. [(See how to enable flag here.)](https://cloud.google.com/sql/docs/mysql/create-edit-iam-instances)
-
-#### IAM Group to Database Role Mapping
-The Cloud Run service maps the permissions that each IAM group and its IAM members should have on each Cloud SQL instance through a [database role](https://dev.mysql.com/doc/refman/8.0/en/roles.html). This database role is then granted to the proper database users that belong to the IAM group, giving them the appropriate database privileges for the IAM group.
-
-Each IAM group that is being managed through the service will need a corresponding database role on **each** Cloud SQL instance configured to properly grant permissions to IAM database users. 
-
-The name of the IAM group database role **MUST BE** the email of the IAM group without everything after and including the **"@"** sign of the IAM group email. 
-(Ex. IAM group with email "example-group@test.com", would have a database role **"example-group"** on each Cloud SQL instance it is configured with.)
-
-The service verifies that a group role exists or creates one on the database if it does not exist. It is recommended that a Database Administrator or project admin create the group roles on each Cloud SQL instance and GRANT the group roles the appropriate privileges to be inherited by database users of those IAM groups prior to running the service. 
-
-This will allow a more smooth service, because if the service is required to create the group roles, it will create them without the proper privileges (blank roles) and in doing so any IAM database users granted the group role will also not get the proper privileges.
-
-**NOTE:** It is up to a Database Administrator or project admin to configure the proper privileges on each group role. The service will then be able to grant or revoke each group role with privileges to the proper database users.
 
 #### Create a database user for service
 To properly manage the database users on each Cloud SQL instance that is configured with the service, the service needs to GRANT/REVOKE database users the proper role(s) corresponding to their IAM group(s). This is achieved by creating an IAM database authenticated service account user on each instance using the service account previously created. This will allow the service account to authenticate to the instance(s) while running the service through the [Cloud SQL Python Connector](https://github.com/GoogleCloudPlatform/cloud-sql-python-connector).
@@ -146,7 +132,7 @@ gcloud sql users create <SERVICE_ACCOUNT_EMAIL> \
 --type=cloud_iam_service_account
 ```
 
-#### Granting Database Permissions to IAM Service Account Instance User
+#### Granting Database Permissions to the Service Account's Database User
 For the service to run smoothly it needs the IAM service account database user to be granted several permissions on all Cloud SQL instances that the user was added to above. This allows for the service to read usernames of other database users and GRANT/REVOKE the group role(s) appropriately.
 
 Connect to all Cloud SQL instances in question with an admin user or another database user with appropriate permissions for the following commands. ([Connecting to an Instance](https://cloud.google.com/sql/docs/mysql/connect-overview))
@@ -170,8 +156,8 @@ Allow the service account to **GRANT/REVOKE** roles to users through being a **R
 GRANT ROLE_ADMIN ON *.* TO '<SERVICE_ACCOUNT_ID>';
 ```
 
-## Deploying Cloud Run Service
-To build and deploy the service using Cloud Run, run the following commands.
+## Deploying to Cloud Run
+To build and deploy the service to Cloud Run, run the following commands:
 
 Build the container image for the service using Cloud Build:
 
@@ -224,6 +210,8 @@ It is recommended to save your JSON payload as a `.json` file (ex. "config.json"
 ### Creating a Cloud Scheduler Job
 An example command creating a Cloud Scheduler job to run the IAM database authentication service for IAM groups and Cloud SQL instances can be seen below.
 
+**NOTE:** If error occurs mentioning "...does not contain App Engine application", simply run `gcloud app create` and try running command again.
+
 Replace the following values:
 - `JOB_NAME`: The name for the Cloud Scheduler job.
 - `SERVICE_URL`: The service URL of the Cloud Run service.
@@ -240,8 +228,6 @@ gcloud scheduler jobs create http \
     --message-body-from-file="<PATH_TO_PAYLOAD>"
 ```
 
-**NOTE:** If error occurs mentioning "...does not contain App Engine application", simply run `gcloud app create` and re-run above command.
-
 The `--schedule` flag is what controls how often the Cloud Scheduler job will trigger the Cloud Run service endpoint. It is currently defaulted to `*/10 * * * *` which will cause it to trigger every 10 minutes. See [Configuring Cron Job Schedules](https://cloud.google.com/scheduler/docs/configuring/cron-job-schedules) on how to format the schedule for different time intervals or [Cron Guru](https://crontab.guru/) to play around with schedule formats.
 
 The payload for the PUT request to the Cloud Run service can also be configured for Cloud Scheduler directly through a command line flag by switching out the `--message-body-from-file` flag for the flag `--message-body` from the command above above as follows.
@@ -250,6 +236,24 @@ The payload for the PUT request to the Cloud Run service can also be configured 
 ```
 
 To learn more about the different Cloud Scheduler flags, read the [official documentation](https://cloud.google.com/sdk/gcloud/reference/scheduler/jobs/create/http).
+
+## Granting Database Permissions to IAM Group Database Roles
+The Cloud Run service maps each IAM group configured in the JSON payload into a [database role](https://dev.mysql.com/doc/refman/8.0/en/roles.html) on each Cloud SQL instance configured. This database role is then granted to the proper database users that belong to the IAM group, giving them the appropriate database privileges for the IAM group.
+
+The name of the mapped IAM group database role is the email of the IAM group without everything after and including the **"@"** sign of the IAM group email. 
+(Ex. IAM group with email "example-group@test.com", would map to a database role **"example-group"** on each Cloud SQL instance it is configured with.)
+
+The service verifies that a group role exists or creates one on the database if it does not exist. It is recommended to configure the Cloud Scheduler job(s) and after having it triggered **atleast** once, have a Database Administrator or project admin verify the creation of the group roles and **GRANT** the group roles the appropriate privileges on each Cloud SQL instance that should be inherited by database users of those IAM groups on all consecutive Cloud Scheduler runs. 
+
+To verify the creation of group roles after Cloud Scheduler has triggered atleast once, the following command can be run:
+Replace the following values:
+- `INSTANCE_NAME`: The name of a Cloud SQL instance that was configured in the Cloud Scheduler JSON payload.
+```
+gcloud sql users list --instance=<INSTANCE_NAME>
+```
+The above command should return a list of all database users on the configured instance, with the **new** group role(s) showing up within the list.
+
+**NOTE:** It is up to a Database Administrator or project admin to configure the proper privileges on each group role. The service will then be able to grant or revoke each group role with privileges to the proper database users.
 
 ## Running Service with Private IP Cloud SQL Connections
 This service does work for Private IP database connections however, there are some additional configurations needed and some limitations to mention.
