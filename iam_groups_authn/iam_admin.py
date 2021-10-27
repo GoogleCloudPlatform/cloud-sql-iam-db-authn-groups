@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# iam_admin.py contains functions for interacting with the Admin Directory API
+# to access IAM groups and their users
+
 from quart.utils import run_sync
 from collections import defaultdict
 from functools import partial

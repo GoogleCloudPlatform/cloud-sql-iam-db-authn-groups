@@ -26,8 +26,10 @@ from iam_groups_authn.sql_admin import get_instance_users, InstanceConnectionNam
 from iam_groups_authn.iam_admin import get_iam_users
 
 # define scopes
-IAM_SCOPES = ["https://www.googleapis.com/auth/admin.directory.group.member.readonly"]
-SQL_SCOPES = ["https://www.googleapis.com/auth/sqlservice.admin"]
+SCOPES = [
+    "https://www.googleapis.com/auth/admin.directory.group.member.readonly",
+    "https://www.googleapis.com/auth/sqlservice.admin",
+]
 
 app = Quart(__name__)
 
@@ -65,13 +67,11 @@ async def run_groups_authn():
 
     # grab default creds from cloud run service account
     creds, project = default()
-    # update default credentials with IAM scopes
-    iam_creds = get_credentials(creds, IAM_SCOPES)
-    # update default credentials with Cloud SQL scopes
-    sql_creds = get_credentials(creds, SQL_SCOPES)
+    # update default credentials with IAM and SQL admin scopes
+    updated_creds = get_credentials(creds, SCOPES)
 
     # create UserService object for API calls
-    user_service = UserService(sql_creds, iam_creds)
+    user_service = UserService(creds)
 
     iam_users, instance_users = await asyncio.gather(
         get_iam_users(user_service, iam_groups),
@@ -100,7 +100,7 @@ async def run_groups_authn():
 
     # for each instance manage users and group role permissions
     instance_coroutines = [
-        manage_instance_users(instance, iam_users, sql_creds, ip_type)
+        manage_instance_users(instance, iam_users, updated_creds, ip_type)
         for instance in sql_instances
     ]
     await asyncio.gather(*instance_coroutines)

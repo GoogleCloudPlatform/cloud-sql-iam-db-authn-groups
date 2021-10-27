@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# sync.py contains functions for syncing IAM groups with Cloud SQL instances
+
 from google.auth import iam
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
@@ -19,11 +21,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from collections import defaultdict
 from google.cloud.sql.connector.instance_connection_manager import IPTypes
-from iam_groups_authn.sql_admin import (
-    init_connection_engine,
-    RoleService,
-    get_users_with_roles,
-)
+from iam_groups_authn.mysql import init_connection_engine, RoleService
 from iam_groups_authn.mysql import mysql_username
 
 # URI for OAuth2 credentials
@@ -33,15 +31,13 @@ TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
 class UserService:
     """Helper class for building googleapis service calls."""
 
-    def __init__(self, sql_creds, iam_creds):
+    def __init__(self, creds):
         """Initialize UserService instance.
 
         Args:
-            sql_creds: OAuth2 credentials to call Cloud SQL Admin APIs.
-            iam_creds: OAuth2 credentials to call Directory Admin APIs
+            creds: OAuth2 credentials to call admin APIs.
         """
-        self.sql_creds = sql_creds
-        self.iam_creds = iam_creds
+        self.creds = creds
 
     def get_group_members(self, group):
         """Get all members of an IAM group.
@@ -56,7 +52,7 @@ class UserService:
             members: List of all members (groups or users) that belong to the IAM group.
         """
         # build service to call Admin SDK Directory API
-        service = build("admin", "directory_v1", credentials=self.iam_creds)
+        service = build("admin", "directory_v1", credentials=self.creds)
 
         try:
             # call the Admin SDK Directory API
@@ -66,7 +62,6 @@ class UserService:
         # handle errors if IAM group does not exist etc.
         except HttpError as e:
             print(f"Could not get IAM group `{group}`. Error: {e}")
-            return []
 
     def get_db_users(self, instance_connection_name):
         """Get all database users of a Cloud SQL instance.
@@ -83,7 +78,7 @@ class UserService:
             users: List of all database users that belong to the Cloud SQL instance.
         """
         # build service to call SQL Admin API
-        service = build("sqladmin", "v1beta4", credentials=self.sql_creds)
+        service = build("sqladmin", "v1beta4", credentials=self.creds)
         results = (
             service.users()
             .list(
@@ -107,7 +102,7 @@ class UserService:
                 instance='my-instance'))
         """
         # build service to call SQL Admin API
-        service = build("sqladmin", "v1beta4", credentials=self.sql_creds)
+        service = build("sqladmin", "v1beta4", credentials=self.creds)
         user = {"name": user_email, "type": "CLOUD_IAM_USER"}
         try:
             results = (
@@ -119,11 +114,32 @@ class UserService:
                 )
                 .execute()
             )
+            return
         except Exception as e:
             print(
                 f"Could not add IAM user `{user_email}` to DB Instance `{instance_connection_name.instance}`. Error: {e}"
             )
-        return
+
+
+async def get_users_with_roles(role_service, group_names):
+    """Get mapping of group role grants on DB users.
+
+    Args:
+        role_service: A RoleService class instance.
+        group_names: List of all IAM group names.
+
+    Returns: Dict mapping group role to all users who have the role granted to them.
+    """
+    role_grants = defaultdict(list)
+    for group_name in group_names:
+        group_name = mysql_username(group_name)
+        grants = await role_service.fetch_role_grants(group_name)
+        # loop through grants that are in tuple form (FROM_USER, TO_USER)
+        for grant in grants:
+            # filter into dict for easier access later
+            role, user = grant
+            role_grants[role].append(user)
+    return role_grants
 
 
 async def manage_instance_users(
