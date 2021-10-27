@@ -62,6 +62,7 @@ class UserService:
         # handle errors if IAM group does not exist etc.
         except HttpError as e:
             print(f"Could not get IAM group `{group}`. Error: {e}")
+            raise
 
     def get_db_users(self, instance_connection_name):
         """Get all database users of a Cloud SQL instance.
@@ -119,6 +120,7 @@ class UserService:
             print(
                 f"Could not add IAM user `{user_email}` to DB Instance `{instance_connection_name.instance}`. Error: {e}"
             )
+            raise
 
 
 async def get_users_with_roles(role_service, group_names):
