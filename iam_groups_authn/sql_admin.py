@@ -15,9 +15,9 @@
 # sql_admin.py contains functions for interacting with the SQL Admin API
 
 from functools import partial
-from collections import defaultdict
 from quart.utils import run_sync
 from typing import NamedTuple
+from iam_groups_authn.sync import get_users_to_add
 
 
 class InstanceConnectionName(NamedTuple):
@@ -42,8 +42,8 @@ async def get_instance_users(user_service, instance_connection_name):
 
     Args:
         user_service: A UserService object for calling SQL admin APIs.
-        instance_connection_name: List of Cloud SQL instance connection names.
-            (e.g., ["my-project:my-region:my-instance", "my-project:my-region:my-other-instance"])
+        instance_connection_name: Cloud SQL instance connection name.
+            (e.g., "my-project:my-region:my-instance")
 
     Returns:
         db_users: A list with the names of database users for the given instance.
@@ -58,3 +58,25 @@ async def get_instance_users(user_service, instance_connection_name):
     for user in users:
         db_users.append(user["name"])
     return db_users
+
+
+async def add_missing_db_users(
+    user_service, iam_future, db_future, instance_connection_name
+):
+    """Add missing IAM users as database users on instance.
+
+    Args:
+        user_service: A UserService object for calling SQL admin APIs.
+        iam_future: Future for list of IAM users who are members of IAM group.
+        db_future: Future for list of DB users on Cloud SQL database instance.
+        instance_connection_name: Cloud SQL instance connection name.
+            (e.g., "my-project:my-region:my-instance")
+    """
+    iam_users, db_users = await iam_future, await db_future
+    # find IAM users who are missing as DB users
+    missing_db_users = get_users_to_add(iam_users, db_users)
+    # add missing users to database instance
+    for user in missing_db_users:
+        user_service.insert_db_user(
+            user, InstanceConnectionName(*instance_connection_name.split(":"))
+        )

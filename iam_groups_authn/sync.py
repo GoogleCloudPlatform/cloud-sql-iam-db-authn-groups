@@ -123,84 +123,23 @@ class UserService:
             raise
 
 
-async def get_users_with_roles(role_service, group_names):
+async def get_users_with_roles(role_service, group_name):
     """Get mapping of group role grants on DB users.
 
     Args:
         role_service: A RoleService class instance.
-        group_names: List of all IAM group names.
+        group_name: Name of IAM group.
 
-    Returns: Dict mapping group role to all users who have the role granted to them.
+    Returns: List of all users who have the role granted to them.
     """
-    role_grants = defaultdict(list)
-    for group_name in group_names:
-        group_name = mysql_username(group_name)
-        grants = await role_service.fetch_role_grants(group_name)
-        # loop through grants that are in tuple form (FROM_USER, TO_USER)
-        for grant in grants:
-            # filter into dict for easier access later
-            role, user = grant
-            role_grants[role].append(user)
+    role_grants = []
+    group_name = mysql_username(group_name)
+    grants = await role_service.fetch_role_grants(group_name)
+    # loop through grants that are in tuple form (FROM_USER, TO_USER)
+    for grant in grants:
+        # add users who have role
+        role_grants.append(grant[1])
     return role_grants
-
-
-async def manage_instance_users(
-    instance_connection_name, iam_users, creds, ip_type=IPTypes.PUBLIC
-):
-    """Function to manage database instance users.
-
-    Manage DB users within database instance which includes: connect to instance,
-    verify/create group roles, add roles to DB users who are missing them,
-    and revoke roles from users no longer in IAM group.
-
-    Args:
-        instance_connection_name: Instance connection name of Cloud SQL instance.
-            (e.g. "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>")
-        iam_users: Set containing all IAM users found within IAM groups.
-        creds: OAuth2 credentials with SQL scopes applied.
-        ip_type: IP address type for instance connection.
-            (IPTypes.PUBLIC or IPTypes.PRIVATE)
-    """
-    db = init_connection_engine(instance_connection_name, creds, ip_type)
-    # create connection to db instance
-    with db.connect() as db_connection:
-        role_service = RoleService(db_connection)
-        await manage_user_roles(role_service, iam_users)
-    return
-
-
-async def manage_user_roles(role_service, iam_users):
-    """Manage group role permissions for DB users.
-
-    Create, grant, revoke proper IAM group role permissions to database users.
-
-    Args:
-        role_service: A RoleService class object for accessing grants in db.
-        iam_users: Set containing all IAM users found within IAM groups.
-    """
-    users_with_roles = await get_users_with_roles(role_service, iam_users.keys())
-    for group, users in iam_users.items():
-        # mysql role does not need email part and can be truncated
-        role = mysql_username(group)
-        # truncate mysql_usernames
-        mysql_usernames = [mysql_username(user) for user in users]
-        # create or verify group role exists
-        await role_service.create_group_role(role)
-        # find DB users who are part of IAM group that need role granted to them
-        users_to_grant = [
-            username
-            for username in mysql_usernames
-            if username not in users_with_roles[role]
-        ]
-        await role_service.grant_group_role(role, users_to_grant)
-        # get list of users who have group role but are not in IAM group
-        users_to_revoke = [
-            user_with_role
-            for user_with_role in users_with_roles[role]
-            if user_with_role not in mysql_usernames
-        ]
-        # revoke group role from users no longer in IAM group
-        await role_service.revoke_group_role(role, users_to_revoke)
 
 
 def get_credentials(creds, scopes):
@@ -241,29 +180,106 @@ def get_credentials(creds, scopes):
     return updated_credentials
 
 
-def get_users_to_add(iam_users, instance_users):
+def get_users_to_add(iam_users, db_users):
     """Find IAM users who are missing as DB users.
 
-    Given a dict mapping IAM groups to their IAM users, and a dict mapping Cloud SQL
-    instances to their DB users, find IAM users who are missing their corresponding DB user.
+    Given a list of IAM users, and a list database users, find the IAM users
+    who are missing their corresponding DB user.
 
     Args:
-        iam_users: Dict where key is IAM group name and mapped value is list of that group's
-            IAM users. (e.g. iam_users["example-group@abc.com] = ["user1", "user2", "user3"])
-        instance_users: Dict where key is instance name and mapped value is list of that
-            instance's DB users.(e.g. instance_users["my-instance"] = ["db-user1", "db-user2"])
+        iam_users: List of that group's IAM users. (e.g. ["user1", "user2", "user3"])
+        db_users: List of an instance's database users. (e.g. ["db-user1", "db-user2"])
 
     Returns:
-        missing_db_users: Dict where key is instance name and mapped value is set of DB user's
-            needing to be inserted into instance.
+        missing_db_users: Set of names of DB user's needing to be inserted into instance.
     """
-    missing_db_users = defaultdict(set)
-    for group, users in iam_users.items():
-        for instance, db_users in instance_users.items():
-            missing_users = [
-                user for user in users if mysql_username(user) not in db_users
-            ]
-            if len(missing_users) > 0:
-                for user in missing_users:
-                    missing_db_users[instance].add(user)
-    return missing_db_users
+    missing_db_users = [
+        user for user in iam_users if mysql_username(user) not in db_users
+    ]
+    return set(missing_db_users)
+
+
+async def verify_group_role(group, role_service):
+    """Verify IAM group role is on a database (create if it does not exist)
+
+    Args:
+        group: IAM group email address.
+        role_service: A RoleService class instance.
+    """
+    # mysql role does not need email part and can be truncated
+    role = mysql_username(group)
+    # create or verify group role exists
+    await role_service.create_group_role(role)
+
+
+async def revoke_iam_group_role(
+    role_service,
+    group,
+    users_with_roles_future,
+    verify_role_future,
+    add_users_future,
+    iam_users_future,
+):
+    """Revoke IAM group role from database users no longer in IAM group.
+
+    Args:
+        role_service: A RoleService class instance.
+        group: IAM group email address.
+        users_with_roles_future: Future for list of database users who have group role.
+        verify_role_future: Future for verifying/creating group role on database.
+        add_users_future: Future for adding missing IAM users as database users.
+        iam_users_future: Future for list of IAM users in IAM group.
+    """
+    # await dependent tasks
+    await verify_role_future
+    await add_users_future
+    iam_users = await iam_users_future
+    users_with_roles = await users_with_roles_future
+
+    # mysql role does not need email part and can be truncated
+    role = mysql_username(group)
+    # truncate mysql_usernames
+    mysql_usernames = [mysql_username(user) for user in iam_users]
+    # get list of users who have group role but are not in IAM group
+    users_to_revoke = [
+        user_with_role
+        for user_with_role in users_with_roles
+        if user_with_role not in mysql_usernames
+    ]
+    # revoke group role from users no longer in IAM group
+    await role_service.revoke_group_role(role, users_to_revoke)
+
+
+async def grant_iam_group_role(
+    role_service,
+    group,
+    users_with_roles_future,
+    verify_role_future,
+    add_users_future,
+    iam_users_future,
+):
+    """Grant IAM group role to IAM database users missing it.
+
+    Args:
+        role_service: A RoleService class instance.
+        group: IAM group email address.
+        users_with_roles_future: Future for list of database users who have group role.
+        verify_role_future: Future for verifying/creating group role on database.
+        add_users_future: Future for adding missing IAM users as database users.
+        iam_users_future: Future for list of IAM users in IAM group.
+    """
+    # await dependent tasks
+    await verify_role_future
+    await add_users_future
+    iam_users = await iam_users_future
+    users_with_roles = await users_with_roles_future
+
+    # mysql role does not need email part and can be truncated
+    role = mysql_username(group)
+    # truncate mysql_usernames
+    mysql_usernames = [mysql_username(user) for user in iam_users]
+    # find DB users who are part of IAM group that need role granted to them
+    users_to_grant = [
+        username for username in mysql_usernames if username not in users_with_roles
+    ]
+    await role_service.grant_group_role(role, users_to_grant)
