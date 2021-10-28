@@ -79,14 +79,14 @@ async def run_groups_authn():
     # create UserService object for API calls
     user_service = UserService(creds)
 
-    # keep track of iam and instance tasks
-    iam_tasks = {}
+    # keep track of IAM group and database instance tasks
+    group_tasks = {}
     instance_tasks = {}
 
     # loop iam_groups and sql_instances creating async tasks
     for group in iam_groups:
         group_task = asyncio.create_task(get_iam_users(user_service, group))
-        iam_tasks[group] = group_task
+        group_tasks[group] = group_task
 
     for instance in sql_instances:
         instance_task = asyncio.create_task(get_instance_users(user_service, instance))
@@ -98,7 +98,7 @@ async def run_groups_authn():
             # add missing IAM group members to database
             add_users_task = asyncio.create_task(
                 add_missing_db_users(
-                    user_service, iam_tasks[group], instance_tasks[instance], instance
+                    user_service, group_tasks[group], instance_tasks[instance], instance
                 )
             )
 
@@ -124,7 +124,7 @@ async def run_groups_authn():
                     users_with_roles_task,
                     verify_role_task,
                     add_users_task,
-                    iam_tasks[group],
+                    group_tasks[group],
                 )
             )
 
@@ -136,7 +136,7 @@ async def run_groups_authn():
                     users_with_roles_task,
                     verify_role_task,
                     add_users_task,
-                    iam_tasks[group],
+                    group_tasks[group],
                 )
             )
             await revoke_role_task
