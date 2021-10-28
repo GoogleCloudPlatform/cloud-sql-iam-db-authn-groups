@@ -115,7 +115,13 @@ async def run_groups_authn():
             )
 
             # await dependent tasks
-            await asyncio.gather(add_users_task, verify_role_task)
+            results = await asyncio.gather(
+                add_users_task, verify_role_task, return_exceptions=True
+            )
+            # raise exception if found
+            for result in results:
+                if issubclass(type(result), Exception):
+                    raise result
 
             # revoke group role from users no longer in IAM group
             revoke_role_task = asyncio.create_task(
@@ -136,6 +142,12 @@ async def run_groups_authn():
                     group_tasks[group],
                 )
             )
-            await asyncio.gather(revoke_role_task, grant_role_task)
+            results = await asyncio.gather(
+                revoke_role_task, grant_role_task, return_exceptions=True
+            )
+            # raise exception if found
+            for result in results:
+                if issubclass(type(result), Exception):
+                    raise result
 
     return "Sync successful.", 200
