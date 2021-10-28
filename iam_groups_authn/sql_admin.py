@@ -14,8 +14,6 @@
 
 # sql_admin.py contains functions for interacting with the SQL Admin API
 
-from functools import partial
-from quart.utils import run_sync
 from typing import NamedTuple
 from iam_groups_authn.sync import get_users_to_add
 
@@ -49,12 +47,10 @@ async def get_instance_users(user_service, instance_connection_name):
         db_users: A list with the names of database users for the given instance.
     """
     db_users = []
-    # create dict to hold database users of each instance
-    get_users = partial(
-        user_service.get_db_users,
-        InstanceConnectionName(*instance_connection_name.split(":")),
+    # get database users for instance
+    users = await user_service.get_db_users(
+        InstanceConnectionName(*instance_connection_name.split(":"))
     )
-    users = await run_sync(get_users)()
     for user in users:
         db_users.append(user["name"])
     return db_users

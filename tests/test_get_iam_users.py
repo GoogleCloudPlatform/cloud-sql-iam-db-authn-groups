@@ -14,6 +14,7 @@
 
 import pytest
 from iam_groups_authn.iam_admin import get_iam_users
+from iam_groups_authn.utils import async_wrap
 
 
 class FakeUserService:
@@ -27,6 +28,7 @@ class FakeUserService:
         """
         self.members = members
 
+    @async_wrap
     def get_group_members(self, group):
         """Fake get_group_members for testing.
 

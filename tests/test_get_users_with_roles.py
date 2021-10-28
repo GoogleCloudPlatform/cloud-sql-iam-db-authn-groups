@@ -38,7 +38,7 @@ async def test_single_group_role():
     """Test with single group role for happy path when multiples users are granted group role."""
     data = {"group": [("group", "user"), ("group", "user2"), ("group", "user3")]}
     role_service = FakeRoleService(data)
-    users_with_roles = await get_users_with_roles(role_service, "group@test.com")
+    users_with_roles = await get_users_with_roles(role_service, "group")
     assert users_with_roles == ["user", "user2", "user3"]
 
 
@@ -50,10 +50,10 @@ async def test_multiple_group_roles():
         "group2": [("group2", "user3"), ("group2", "user4")],
     }
     role_service = FakeRoleService(data)
-    users_with_roles = await get_users_with_roles(role_service, "group@test.com")
+    users_with_roles = await get_users_with_roles(role_service, "group")
     assert users_with_roles == ["user", "user2"]
 
-    users_with_roles = await get_users_with_roles(role_service, "group2@test.com")
+    users_with_roles = await get_users_with_roles(role_service, "group2")
     assert users_with_roles == ["user3", "user4"]
 
 
@@ -64,7 +64,7 @@ async def test_no_users_with_roles():
     Should return empty defaultdict of type list"""
     data = defaultdict(list)
     role_service = FakeRoleService(data)
-    users_with_roles = await get_users_with_roles(role_service, "group@test.com")
+    users_with_roles = await get_users_with_roles(role_service, "group")
     assert users_with_roles == []
 
 
@@ -79,11 +79,11 @@ async def test_no_users_for_one_role():
         "group3": [],
     }
     role_service = FakeRoleService(data)
-    users_with_roles = await get_users_with_roles(role_service, "group@test.com")
+    users_with_roles = await get_users_with_roles(role_service, "group")
     assert users_with_roles == ["user", "user2"]
 
-    users_with_roles = await get_users_with_roles(role_service, "group2@test.com")
+    users_with_roles = await get_users_with_roles(role_service, "group2")
     assert users_with_roles == ["user3", "user4"]
 
-    users_with_roles = await get_users_with_roles(role_service, "group3@test.com")
+    users_with_roles = await get_users_with_roles(role_service, "group3")
     assert users_with_roles == []

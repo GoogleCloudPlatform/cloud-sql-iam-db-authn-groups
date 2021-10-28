@@ -15,10 +15,6 @@
 # iam_admin.py contains functions for interacting with the Admin Directory API
 # to access IAM groups and their users
 
-from quart.utils import run_sync
-from collections import defaultdict
-from functools import partial
-
 
 async def get_iam_users(user_service, group):
     """Get list of all IAM users within an IAM group.
@@ -35,19 +31,18 @@ async def get_iam_users(user_service, group):
     """
     group_queue = [group]
     # set initial groups searched to input group
-    searched_groups = group_queue.copy()
+    searched_groups = set(group)
     group_users = set()
     while group_queue:
         current_group = group_queue.pop(0)
         # get all members of current IAM group
-        members_partial = partial(user_service.get_group_members, current_group)
-        members = await run_sync(members_partial)()
+        members = await user_service.get_group_members(current_group)
         # check if member is a group, otherwise they are a user
         for member in members:
             if member["type"] == "GROUP":
                 if member["email"] not in searched_groups:
                     # add current group to searched groups
-                    searched_groups.append(member["email"])
+                    searched_groups.add(member["email"])
                     # add group to queue
                     group_queue.append(member["email"])
             elif member["type"] == "USER":

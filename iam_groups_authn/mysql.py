@@ -15,11 +15,10 @@
 # mysql.py contains all database specific functions for connecting
 # and querying a MySQL database
 
-import asyncio
 import sqlalchemy
 from google.cloud.sql.connector import connector
 from google.cloud.sql.connector.instance_connection_manager import IPTypes
-from functools import partial, wraps
+from iam_groups_authn.utils import async_wrap
 
 
 def mysql_username(iam_email):
@@ -36,23 +35,6 @@ def mysql_username(iam_email):
     """
     username = iam_email.split("@")[0]
     return username
-
-
-def async_wrap(func):
-    """Wrapper function to turn synchronous functions into async functions.
-
-    Args:
-        func: Synchronous function to wrap.
-    """
-
-    @wraps(func)
-    async def run(*args, loop=None, executor=None, **kwargs):
-        if loop is None:
-            loop = asyncio.get_event_loop()
-        pfunc = partial(func, *args, **kwargs)
-        return await loop.run_in_executor(executor, pfunc)
-
-    return run
 
 
 class RoleService:

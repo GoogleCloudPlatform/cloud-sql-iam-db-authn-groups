@@ -19,14 +19,13 @@ from google.cloud.sql.connector.instance_connection_manager import IPTypes
 from iam_groups_authn.sync import (
     get_credentials,
     get_users_with_roles,
-    verify_group_role,
     revoke_iam_group_role,
     grant_iam_group_role,
     UserService,
 )
 from iam_groups_authn.sql_admin import get_instance_users, add_missing_db_users
 from iam_groups_authn.iam_admin import get_iam_users
-from iam_groups_authn.mysql import init_connection_engine, RoleService
+from iam_groups_authn.mysql import init_connection_engine, RoleService, mysql_username
 
 # define scopes
 SCOPES = [
@@ -107,23 +106,23 @@ async def run_groups_authn():
             role_service = RoleService(db)
 
             # verify role for IAM group exists on database, create if does not exist
-            verify_role_task = asyncio.create_task(
-                verify_group_role(group, role_service)
-            )
+            role = mysql_username(group)
+            verify_role_task = asyncio.create_task(role_service.create_group_role(role))
 
             # get database users who have group role
             users_with_roles_task = asyncio.create_task(
-                get_users_with_roles(role_service, group)
+                get_users_with_roles(role_service, role)
             )
+
+            # await dependent tasks
+            await asyncio.gather(add_users_task, verify_role_task)
 
             # revoke group role from users no longer in IAM group
             revoke_role_task = asyncio.create_task(
                 revoke_iam_group_role(
                     role_service,
-                    group,
+                    role,
                     users_with_roles_task,
-                    verify_role_task,
-                    add_users_task,
                     group_tasks[group],
                 )
             )
@@ -132,14 +131,11 @@ async def run_groups_authn():
             grant_role_task = asyncio.create_task(
                 grant_iam_group_role(
                     role_service,
-                    group,
+                    role,
                     users_with_roles_task,
-                    verify_role_task,
-                    add_users_task,
                     group_tasks[group],
                 )
             )
-            await revoke_role_task
-            await grant_role_task
+            await asyncio.gather(revoke_role_task, grant_role_task)
 
     return "Sync successful.", 200
