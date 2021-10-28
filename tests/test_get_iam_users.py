@@ -50,10 +50,8 @@ async def test_single_group():
         ]
     }
     fake_service = FakeUserService(data)
-    iam_users = await get_iam_users(fake_service, groups=["test-group@test.com"])
-    assert iam_users == {
-        "test-group@test.com": set(("test@test.com", "user@test.com", "john@abc.com"))
-    }
+    iam_users = await get_iam_users(fake_service, group="test-group@test.com")
+    assert iam_users == set(("test@test.com", "user@test.com", "john@abc.com"))
 
 
 @pytest.mark.asyncio
@@ -75,13 +73,10 @@ async def test_multiple_groups():
         ],
     }
     fake_service = FakeUserService(data)
-    iam_users = await get_iam_users(
-        fake_service, groups=["test-group@test.com", "test-group2@abc.com"]
-    )
-    assert iam_users == {
-        "test-group@test.com": set(("test@test.com", "user@test.com", "john@abc.com")),
-        "test-group2@abc.com": set(("jack@test.com", "jane@xyz.com")),
-    }
+    iam_users = await get_iam_users(fake_service, group="test-group@test.com")
+    assert iam_users == set(("test@test.com", "user@test.com", "john@abc.com"))
+    iam_users = await get_iam_users(fake_service, group="test-group2@abc.com")
+    assert iam_users == set(("jack@test.com", "jane@xyz.com"))
 
 
 @pytest.mark.asyncio
@@ -101,10 +96,8 @@ async def test_group_within_group():
         ],
     }
     fake_service = FakeUserService(data)
-    iam_users = await get_iam_users(fake_service, groups=["test-group3@xyz.com"])
-    assert iam_users == {
-        "test-group3@xyz.com": set(("test@test.com", "jack@test.com", "jane@xyz.com"))
-    }
+    iam_users = await get_iam_users(fake_service, group="test-group3@xyz.com")
+    assert iam_users == set(("test@test.com", "jack@test.com", "jane@xyz.com"))
 
 
 @pytest.mark.asyncio
@@ -117,8 +110,8 @@ async def test_empty_group():
         "empty-group@test.com": [],
     }
     fake_service = FakeUserService(data)
-    iam_users = await get_iam_users(fake_service, groups=["empty-group@test.com"])
-    assert iam_users == {}
+    iam_users = await get_iam_users(fake_service, group="empty-group@test.com")
+    assert iam_users == set()
 
 
 @pytest.mark.asyncio
@@ -134,8 +127,8 @@ async def test_customer_group():
         ],
     }
     fake_service = FakeUserService(data)
-    iam_users = await get_iam_users(fake_service, groups=["customer-group@test.com"])
-    assert iam_users == {}
+    iam_users = await get_iam_users(fake_service, group="customer-group@test.com")
+    assert iam_users == set()
 
 
 @pytest.mark.asyncio
@@ -156,7 +149,5 @@ async def test_group_loop():
         ],
     }
     fake_service = FakeUserService(data)
-    iam_users = await get_iam_users(fake_service, groups=["test-group3@xyz.com"])
-    assert iam_users == {
-        "test-group3@xyz.com": set(("test@test.com", "jack@test.com", "jane@xyz.com"))
-    }
+    iam_users = await get_iam_users(fake_service, group="test-group3@xyz.com")
+    assert iam_users == set(("test@test.com", "jack@test.com", "jane@xyz.com"))
