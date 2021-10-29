@@ -16,7 +16,6 @@
 
 from typing import NamedTuple
 from iam_groups_authn.sync import get_users_to_add
-import logging
 
 
 class InstanceConnectionName(NamedTuple):
@@ -77,8 +76,4 @@ async def add_missing_db_users(
         user_service.insert_db_user(
             user, InstanceConnectionName(*instance_connection_name.split(":"))
         )
-    # log if missing users exist
-    if len(missing_db_users) > 0:
-        logging.info(
-            f"Added the following IAM members as database users on instance `{instance_connection_name}`: {missing_db_users}"
-        )
+    return missing_db_users

@@ -21,7 +21,6 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from iam_groups_authn.mysql import mysql_username
 from iam_groups_authn.utils import async_wrap
-import logging
 
 # URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
@@ -61,10 +60,9 @@ class UserService:
             return members
         # handle errors if IAM group does not exist etc.
         except HttpError as e:
-            logging.error(
+            raise HttpError(
                 f"Error: Failed to get IAM members of IAM group `{group}`. Verify group exists and is configured correctly."
-            )
-            raise
+            ) from e
 
     @async_wrap
     def get_db_users(self, instance_connection_name):
@@ -94,11 +92,10 @@ class UserService:
             )
             users = results.get("items", [])
             return users
-        except Exception:
-            logging.error(
+        except Exception as e:
+            raise Exception(
                 f"Error: Failed to get the database users for instance `{instance_connection_name}`. Verify instance connection name and instance details."
-            )
-            raise
+            ) from e
 
     def insert_db_user(self, user_email, instance_connection_name):
         """Create DB user from IAM user.
@@ -125,11 +122,10 @@ class UserService:
                 .execute()
             )
             return
-        except Exception:
-            logging.error(
+        except Exception as e:
+            raise Exception(
                 f"Error: Failed to add IAM user `{user_email}` to Cloud SQL database instance `{instance_connection_name.instance}`."
-            )
-            raise
+            ) from e
 
 
 async def get_users_with_roles(role_service, role):
@@ -182,11 +178,10 @@ def get_credentials(creds, scopes):
         # if not valid, refresh credentials
         if not updated_credentials.valid:
             updated_credentials.refresh(request)
-    except Exception:
-        logging.error(
+    except Exception as e:
+        raise Exception(
             "Error: Failed to get proper credentials for service. Verify service account used to run service."
-        )
-        raise
+        ) from e
 
     return updated_credentials
 
@@ -213,7 +208,6 @@ def get_users_to_add(iam_users, db_users):
 async def revoke_iam_group_role(
     role_service,
     role,
-    instance_connection_name,
     users_with_roles_future,
     iam_users_future,
 ):
@@ -222,8 +216,6 @@ async def revoke_iam_group_role(
     Args:
         role_service: A RoleService class instance.
         role: IAM group role.
-        instance_connection_name: Cloud SQL instance connection name.
-            (e.g., "my-project:my-region:my-instance")
         users_with_roles_future: Future for list of database users who have group role.
         iam_users_future: Future for list of IAM users in IAM group.
     """
@@ -241,17 +233,13 @@ async def revoke_iam_group_role(
     ]
     # revoke group role from users no longer in IAM group
     await role_service.revoke_group_role(role, users_to_revoke)
-    # log if role is revoked
-    if len(users_to_revoke) > 0:
-        logging.info(
-            f"Revoked group role `{role}` from the following database users on instance `{instance_connection_name}`: {users_to_revoke}"
-        )
+
+    return users_to_revoke
 
 
 async def grant_iam_group_role(
     role_service,
     role,
-    instance_connection_name,
     users_with_roles_future,
     iam_users_future,
 ):
@@ -260,8 +248,6 @@ async def grant_iam_group_role(
     Args:
         role_service: A RoleService class instance.
         role: IAM group role.
-        instance_connection_name: Cloud SQL instance connection name.
-            (e.g., "my-project:my-region:my-instance")
         users_with_roles_future: Future for list of database users who have group role.
         iam_users_future: Future for list of IAM users in IAM group.
     """
@@ -276,8 +262,5 @@ async def grant_iam_group_role(
         username for username in mysql_usernames if username not in users_with_roles
     ]
     await role_service.grant_group_role(role, users_to_grant)
-    # log if role is granted
-    if len(users_to_grant) > 0:
-        logging.info(
-            f"Granted group role `{role}` to the following database users on instance `{instance_connection_name}`: {users_to_grant}"
-        )
+
+    return users_to_grant

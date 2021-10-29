@@ -140,12 +140,18 @@ async def run_groups_authn():
                 if issubclass(type(result), Exception):
                     raise result
 
+            # log IAM users added as database users
+            added_users = results[0]
+            if len(added_users) > 0:
+                logging.debug(
+                    f"[{instance}][{group}] Users added to database: {added_users}"
+                )
+
             # revoke group role from users no longer in IAM group
             revoke_role_task = asyncio.create_task(
                 revoke_iam_group_role(
                     role_service,
                     role,
-                    instance,
                     users_with_roles_task,
                     group_tasks[group],
                 )
@@ -156,7 +162,6 @@ async def run_groups_authn():
                 grant_iam_group_role(
                     role_service,
                     role,
-                    instance,
                     users_with_roles_task,
                     group_tasks[group],
                 )
@@ -168,5 +173,13 @@ async def run_groups_authn():
             for result in results:
                 if issubclass(type(result), Exception):
                     raise result
+
+            # log sync info
+            revoked_users, granted_users = results
+            logging.info(
+                f"[{instance}][{group}] Sync successful: {len(revoked_users)} users were revoked group role, {len(granted_users)} users were granted group role."
+            )
+            logging.debug(f"[{instance}][{group}] Users revoked role: {revoked_users}.")
+            logging.debug(f"[{instance}][{group}] Users granted role: {granted_users}.")
 
     return "Sync successful.", 200
