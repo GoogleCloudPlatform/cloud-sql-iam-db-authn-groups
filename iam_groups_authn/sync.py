@@ -241,9 +241,11 @@ async def revoke_iam_group_role(
     ]
     # revoke group role from users no longer in IAM group
     await role_service.revoke_group_role(role, users_to_revoke)
-    logging.info(
-        f"Revoked group role `{role}` from the following database users on instance `{instance_connection_name}`: {users_to_revoke}"
-    )
+    # log if role is revoked
+    if len(users_to_revoke) > 0:
+        logging.info(
+            f"Revoked group role `{role}` from the following database users on instance `{instance_connection_name}`: {users_to_revoke}"
+        )
 
 
 async def grant_iam_group_role(
@@ -274,6 +276,8 @@ async def grant_iam_group_role(
         username for username in mysql_usernames if username not in users_with_roles
     ]
     await role_service.grant_group_role(role, users_to_grant)
-    logging.info(
-        f"Granted group role `{role}` to the following database users on instance `{instance_connection_name}`: {users_to_grant}"
-    )
+    # log if role is granted
+    if len(users_to_grant) > 0:
+        logging.info(
+            f"Granted group role `{role}` to the following database users on instance `{instance_connection_name}`: {users_to_grant}"
+        )
