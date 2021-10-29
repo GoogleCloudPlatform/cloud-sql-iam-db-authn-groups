@@ -51,7 +51,9 @@ class UserService:
             members: List of all members (groups or users) that belong to the IAM group.
         """
         # build service to call Admin SDK Directory API
-        service = build("admin", "directory_v1", credentials=self.creds)
+        service = build(
+            "admin", "directory_v1", credentials=self.creds, cache_discovery=False
+        )
 
         try:
             # call the Admin SDK Directory API
@@ -80,7 +82,9 @@ class UserService:
             users: List of all database users that belong to the Cloud SQL instance.
         """
         # build service to call SQL Admin API
-        service = build("sqladmin", "v1beta4", credentials=self.creds)
+        service = build(
+            "sqladmin", "v1beta4", credentials=self.creds, cache_discovery=False
+        )
         try:
             results = (
                 service.users()
@@ -109,7 +113,9 @@ class UserService:
                 instance='my-instance'))
         """
         # build service to call SQL Admin API
-        service = build("sqladmin", "v1beta4", credentials=self.creds)
+        service = build(
+            "sqladmin", "v1beta4", credentials=self.creds, cache_discovery=False
+        )
         user = {"name": user_email, "type": "CLOUD_IAM_USER"}
         try:
             results = (
