@@ -16,6 +16,8 @@ import asyncio
 from quart import Quart, request
 from google.auth import default
 from google.cloud.sql.connector.instance_connection_manager import IPTypes
+import logging
+import google.cloud.logging
 from iam_groups_authn.sync import (
     get_credentials,
     get_users_with_roles,
@@ -35,6 +37,12 @@ SCOPES = [
 
 app = Quart(__name__)
 
+# start logging client
+client = google.cloud.logging.Client()
+client.setup_logging()
+
+logging.info("Cloud Run service has started!")
+
 
 @app.route("/", methods=["GET"])
 def health_check():
@@ -47,6 +55,9 @@ async def run_groups_authn():
     # try reading in required request parameters and verify type, otherwise throw custom error
     sql_instances = body.get("sql_instances")
     if sql_instances is None or type(sql_instances) is not list:
+        logging.error(
+            "Error: Bad request. Missing or incorrect type for required request parameter: `sql_instances`"
+        )
         return (
             "Missing or incorrect type for required request parameter: `sql_instances`",
             400,
@@ -54,6 +65,9 @@ async def run_groups_authn():
 
     iam_groups = body.get("iam_groups")
     if iam_groups is None or type(iam_groups) is not list:
+        logging.error(
+            "Error: Bad request. Missing or incorrect type for required request parameter: `iam_groups`"
+        )
         return (
             "Missing or incorrect type for required request parameter: `iam_groups`",
             400,
@@ -62,6 +76,9 @@ async def run_groups_authn():
     # try reading in private_ip param, default to False
     private_ip = body.get("private_ip", False)
     if type(private_ip) is not bool:
+        logging.error(
+            "Error: Bad request. Incorrect type for request parameter: `private_ip`, should be boolean."
+        )
         return (
             "Incorrect type for request parameter: `private_ip`, should be boolean.",
             400,

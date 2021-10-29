@@ -68,20 +68,19 @@ class RoleService:
         return results
 
     @async_wrap
-    def create_group_role(self, group):
+    def create_group_role(self, role):
         """Verify or create DB role.
 
-        Given a group name, verify existance of DB role or create new DB role matching
-        name of group to manage DB users.
+        Given a group role, verify existance of role on DB or create new role
+        to manage DB users.
 
         Args:
-            db: Database connection pool instance.
-            group: Name of group to be verified as role or created as new role.
+            role: Name of group role to be verified or created as new role.
         """
         # create connection to db instance
         with self.db.connect() as db_connection:
             stmt = sqlalchemy.text("CREATE ROLE IF NOT EXISTS :role")
-            db_connection.execute(stmt, {"role": group})
+            db_connection.execute(stmt, {"role": role})
 
     @async_wrap
     def grant_group_role(self, role, users):
@@ -90,7 +89,6 @@ class RoleService:
         Given a DB group role and a list of DB users, grant the DB role to each user.
 
         Args:
-            db: Database connection pool instance.
             role: Name of DB role to grant to users.
             users: List of DB users' usernames.
         """
@@ -107,7 +105,6 @@ class RoleService:
         Given a DB group role and a list of DB users, revoke the DB role from each user.
 
         Args:
-            db: Database connection pool instance.
             role: Name of DB role to revoke from users.
             users: List of DB users' usernames.
         """
