@@ -145,6 +145,7 @@ async def run_groups_authn():
                 revoke_iam_group_role(
                     role_service,
                     role,
+                    instance,
                     users_with_roles_task,
                     group_tasks[group],
                 )
@@ -155,6 +156,7 @@ async def run_groups_authn():
                 grant_iam_group_role(
                     role_service,
                     role,
+                    instance,
                     users_with_roles_task,
                     group_tasks[group],
                 )
