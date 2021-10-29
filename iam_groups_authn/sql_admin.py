@@ -14,10 +14,8 @@
 
 # sql_admin.py contains functions for interacting with the SQL Admin API
 
-from functools import partial
-from collections import defaultdict
-from quart.utils import run_sync
 from typing import NamedTuple
+from iam_groups_authn.sync import get_users_to_add
 
 
 class InstanceConnectionName(NamedTuple):
@@ -34,28 +32,47 @@ class InstanceConnectionName(NamedTuple):
     instance: str
 
 
-async def get_instance_users(user_service, instance_connection_names):
-    """Get users that belong to each Cloud SQL instance.
+async def get_instance_users(user_service, instance_connection_name):
+    """Get users that belong to a Cloud SQL instance.
 
-    Given a list of Cloud SQL instance names and a Google Cloud project, get a list
-    of database users that belong to each instance.
+    Given a Cloud SQL instance name and a Google Cloud project, get a list
+    of database users that belong to that instance.
 
     Args:
         user_service: A UserService object for calling SQL admin APIs.
-        instance_connection_names: List of Cloud SQL instance connection names.
-            (e.g., ["my-project:my-region:my-instance", "my-project:my-region:my-other-instance"])
+        instance_connection_name: Cloud SQL instance connection name.
+            (e.g., "my-project:my-region:my-instance")
 
     Returns:
-        db_users: A dict with the instance names mapping to their list of database users.
+        db_users: A list with the names of database users for the given instance.
     """
-    # create dict to hold database users of each instance
-    db_users = defaultdict(list)
-    for connection_name in instance_connection_names:
-        get_users = partial(
-            user_service.get_db_users,
-            InstanceConnectionName(*connection_name.split(":")),
-        )
-        users = await run_sync(get_users)()
-        for user in users:
-            db_users[connection_name].append(user["name"])
+    db_users = []
+    # get database users for instance
+    users = await user_service.get_db_users(
+        InstanceConnectionName(*instance_connection_name.split(":"))
+    )
+    for user in users:
+        db_users.append(user["name"])
     return db_users
+
+
+async def add_missing_db_users(
+    user_service, iam_future, db_future, instance_connection_name
+):
+    """Add missing IAM users as database users on instance.
+
+    Args:
+        user_service: A UserService object for calling SQL admin APIs.
+        iam_future: Future for list of IAM users who are members of IAM group.
+        db_future: Future for list of DB users on Cloud SQL database instance.
+        instance_connection_name: Cloud SQL instance connection name.
+            (e.g., "my-project:my-region:my-instance")
+    """
+    iam_users, db_users = await iam_future, await db_future
+    # find IAM users who are missing as DB users
+    missing_db_users = get_users_to_add(iam_users, db_users)
+    # add missing users to database instance
+    for user in missing_db_users:
+        user_service.insert_db_user(
+            user, InstanceConnectionName(*instance_connection_name.split(":"))
+        )

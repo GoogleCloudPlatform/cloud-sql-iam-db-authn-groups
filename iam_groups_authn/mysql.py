@@ -15,11 +15,10 @@
 # mysql.py contains all database specific functions for connecting
 # and querying a MySQL database
 
-import asyncio
 import sqlalchemy
 from google.cloud.sql.connector import connector
 from google.cloud.sql.connector.instance_connection_manager import IPTypes
-from functools import partial, wraps
+from iam_groups_authn.utils import async_wrap
 
 
 def mysql_username(iam_email):
@@ -36,23 +35,6 @@ def mysql_username(iam_email):
     """
     username = iam_email.split("@")[0]
     return username
-
-
-def async_wrap(func):
-    """Wrapper function to turn synchronous functions into async functions.
-
-    Args:
-        func: Synchronous function to wrap.
-    """
-
-    @wraps(func)
-    async def run(*args, loop=None, executor=None, **kwargs):
-        if loop is None:
-            loop = asyncio.get_event_loop()
-        pfunc = partial(func, *args, **kwargs)
-        return await loop.run_in_executor(executor, pfunc)
-
-    return run
 
 
 class RoleService:
@@ -76,11 +58,13 @@ class RoleService:
         Returns:
             results: List of results for given query.
         """
-        # query role_edges table
-        stmt = sqlalchemy.text(
-            "SELECT FROM_USER, TO_USER FROM mysql.role_edges WHERE FROM_USER= :group_name"
-        )
-        results = self.db.execute(stmt, {"group_name": group_name}).fetchall()
+        # create connection to db instance
+        with self.db.connect() as db_connection:
+            # query role_edges table
+            stmt = sqlalchemy.text(
+                "SELECT FROM_USER, TO_USER FROM mysql.role_edges WHERE FROM_USER= :group_name"
+            )
+            results = db_connection.execute(stmt, {"group_name": group_name}).fetchall()
         return results
 
     @async_wrap
@@ -94,8 +78,10 @@ class RoleService:
             db: Database connection pool instance.
             group: Name of group to be verified as role or created as new role.
         """
-        stmt = sqlalchemy.text("CREATE ROLE IF NOT EXISTS :role")
-        self.db.execute(stmt, {"role": group})
+        # create connection to db instance
+        with self.db.connect() as db_connection:
+            stmt = sqlalchemy.text("CREATE ROLE IF NOT EXISTS :role")
+            db_connection.execute(stmt, {"role": group})
 
     @async_wrap
     def grant_group_role(self, role, users):
@@ -108,9 +94,11 @@ class RoleService:
             role: Name of DB role to grant to users.
             users: List of DB users' usernames.
         """
-        stmt = sqlalchemy.text("GRANT :role TO :user")
-        for user in users:
-            self.db.execute(stmt, {"role": role, "user": user})
+        # create connection to db instance
+        with self.db.connect() as db_connection:
+            stmt = sqlalchemy.text("GRANT :role TO :user")
+            for user in users:
+                db_connection.execute(stmt, {"role": role, "user": user})
 
     @async_wrap
     def revoke_group_role(self, role, users):
@@ -123,9 +111,11 @@ class RoleService:
             role: Name of DB role to revoke from users.
             users: List of DB users' usernames.
         """
-        stmt = sqlalchemy.text("REVOKE :role FROM :user")
-        for user in users:
-            self.db.execute(stmt, {"role": role, "user": user})
+        # create connection to db instance
+        with self.db.connect() as db_connection:
+            stmt = sqlalchemy.text("REVOKE :role FROM :user")
+            for user in users:
+                db_connection.execute(stmt, {"role": role, "user": user})
 
 
 def init_connection_engine(instance_connection_name, creds, ip_type=IPTypes.PUBLIC):
