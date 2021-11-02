@@ -40,8 +40,12 @@ app = Quart(__name__)
 # start logging client
 client = google.cloud.logging.Client()
 client.setup_logging()
-
-logging.info("Cloud Run service has started!")
+log_levels = {
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+}
 
 
 @app.route("/", methods=["GET"])
@@ -74,6 +78,15 @@ async def run_groups_authn():
             "Incorrect type for request parameter: `private_ip`, should be boolean.",
             400,
         )
+
+    # optional param to change log level
+    log_level = body.get("log_level")
+    if (
+        log_level is not None
+        and type(log_level) is str
+        and log_level.upper() in log_levels
+    ):
+        logging.getLogger().setLevel(log_levels[log_level.upper()])
 
     # set ip_type to proper type for connector
     ip_type = IPTypes.PRIVATE if private_ip else IPTypes.PUBLIC
@@ -133,10 +146,10 @@ async def run_groups_authn():
 
             # log IAM users added as database users
             added_users = results[0]
-            if len(added_users) > 0:
-                logging.debug(
-                    f"[{instance}][{group}] Users added to database: {added_users}"
-                )
+            logging.debug(
+                "[%s][%s] Users added to database: %s."
+                % (instance, group, list(added_users))
+            )
 
             # revoke group role from users no longer in IAM group
             revoke_role_task = asyncio.create_task(
@@ -168,9 +181,14 @@ async def run_groups_authn():
             # log sync info
             revoked_users, granted_users = results
             logging.info(
-                f"[{instance}][{group}] Sync successful: {len(revoked_users)} users were revoked group role, {len(granted_users)} users were granted group role."
+                "[%s][%s] Sync successful: %s users were revoked group role, %s users were granted group role."
+                % (instance, group, len(revoked_users), len(granted_users))
             )
-            logging.debug(f"[{instance}][{group}] Users revoked role: {revoked_users}.")
-            logging.debug(f"[{instance}][{group}] Users granted role: {granted_users}.")
+            logging.debug(
+                "[%s][%s] Users revoked role: %s." % (instance, group, revoked_users)
+            )
+            logging.debug(
+                "[%s][%s] Users granted role: %s." % (instance, group, granted_users)
+            )
 
     return "Sync successful.", 200
