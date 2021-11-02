@@ -203,7 +203,9 @@ Where:
 - **sql_instances**: List of all Cloud SQL instances to configure.
 - **private_ip** (optional): Boolean flag for private or public IP addresses.
 
-**Note:** These are placeholder values and should be replaced with proper IAM groups and Cloud SQL instance connection names.
+**Note:** These are placeholder values and should be replaced with proper IAM groups and Cloud SQL instance connection names. 
+
+There is an additional optional parameter `"log_level"` for the JSON payload which can be set to one of `"INFO"`, `"DEBUG"`, `"WARNING"`, or `"ERROR"` to change severity of outputted logs. Defaults to `"INFO"` when not specified.
 
 It is recommended to save your JSON payload as a `.json` file (ex. "config.json").
 

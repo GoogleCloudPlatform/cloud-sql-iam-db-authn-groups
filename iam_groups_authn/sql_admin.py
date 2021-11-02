@@ -76,3 +76,4 @@ async def add_missing_db_users(
         user_service.insert_db_user(
             user, InstanceConnectionName(*instance_connection_name.split(":"))
         )
+    return missing_db_users
