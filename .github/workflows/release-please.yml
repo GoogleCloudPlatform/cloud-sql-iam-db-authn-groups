@@ -26,4 +26,4 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           release-type: python
-          package-name: release-please-action
+          package-name: cloud-sql-iam-db-authn-groups
