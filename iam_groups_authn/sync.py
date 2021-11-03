@@ -53,15 +53,12 @@ class UserService:
             members: List of all members (groups or users) that belong to the IAM group.
         """
         # build service to call Admin SDK Directory API
-        updated_creds = get_credentials(
-            self.creds,
-            scopes=[
-                "https://www.googleapis.com/auth/admin.directory.group.member.readonly"
-            ],
-        )
+        if not self.creds.valid:
+            request = Request()
+            self.creds.refresh(request)
 
         headers = {
-            "Authorization": f"Bearer {updated_creds.token}",
+            "Authorization": f"Bearer {self.creds.token}",
         }
 
         url = f"https://admin.googleapis.com/admin/directory/v1/groups/{group}/members"

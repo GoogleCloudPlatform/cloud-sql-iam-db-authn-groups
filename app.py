@@ -97,7 +97,7 @@ async def run_groups_authn():
     updated_creds = get_credentials(creds, SCOPES)
 
     # create UserService object for API calls
-    user_service = UserService(creds)
+    user_service = UserService(updated_creds)
 
     # keep track of IAM group and database instance tasks
     group_tasks = {}
