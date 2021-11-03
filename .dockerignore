@@ -5,6 +5,7 @@ README.md
 *.pyd
 __pycache__
 .gitignore
-build-and-deploy.sh
-tests
-.github
+tests/
+images/
+scripts/
+.github/
