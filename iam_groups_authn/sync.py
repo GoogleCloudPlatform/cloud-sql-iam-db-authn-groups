@@ -21,6 +21,7 @@ from google.oauth2 import service_account
 from iam_groups_authn.mysql import mysql_username
 import json
 from aiohttp import ClientSession
+from enum import Enum
 
 # URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
@@ -58,7 +59,7 @@ class UserService:
         try:
             # call the Admin SDK Directory API
             resp = await authenticated_request(
-                self.creds, url, self.client_session, "GET"
+                self.creds, url, self.client_session, RequestType.get
             )
             results = json.loads(await resp.text())
             members = results.get("members", [])
@@ -91,7 +92,7 @@ class UserService:
         try:
             # call the SQL Admin API
             resp = await authenticated_request(
-                self.creds, url, self.client_session, "GET"
+                self.creds, url, self.client_session, RequestType.get
             )
             results = json.loads(await resp.text())
             users = results.get("items", [])
@@ -121,7 +122,7 @@ class UserService:
         try:
             # call the SQL Admin API
             resp = await authenticated_request(
-                self.creds, url, self.client_session, "POST", body=user
+                self.creds, url, self.client_session, RequestType.post, body=user
             )
             return
         except Exception as e:
@@ -141,6 +142,13 @@ class UserService:
         asyncio.run_coroutine_threadsafe(deconstruct(), loop=asyncio.get_event_loop())
 
 
+class RequestType(Enum):
+    """Helper class for supported aiohttp request types."""
+
+    get = 1
+    post = 2
+
+
 async def authenticated_request(creds, url, client_session, request_type, body=None):
     """Helper function to build authenticated aiohttp requests.
 
@@ -148,7 +156,7 @@ async def authenticated_request(creds, url, client_session, request_type, body=N
         creds: OAuth2 credentials for authorizing requests.
         url: URL for aiohttp request.
         client_session: aiohttp ClientSession object.
-        request_type: String determining request type ('GET' or 'POST').
+        request_type: RequestType enum determining request type.
         body: (optional) JSON body for request.
 
     Return:
@@ -162,16 +170,15 @@ async def authenticated_request(creds, url, client_session, request_type, body=N
         "Authorization": f"Bearer {creds.token}",
     }
 
-    if request_type.upper() == "GET":
+    if request_type == RequestType.get:
         return await client_session.get(url, headers=headers, raise_for_status=True)
-    elif request_type.upper() == "POST":
+    elif request_type == RequestType.post:
         return await client_session.post(
             url, headers=headers, json=body, raise_for_status=True
         )
     else:
         raise ValueError(
-            "Request type not recognized! "
-            "Please verify request is type 'GET' or 'POST'."
+            "Request type not recognized! " "Please verify RequestType is valid."
         )
 
 
