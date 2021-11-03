@@ -53,20 +53,12 @@ class UserService:
             members: List of all members (groups or users) that belong to the IAM group.
         """
         # build service to call Admin SDK Directory API
-        if not self.creds.valid:
-            request = Request()
-            self.creds.refresh(request)
-
-        headers = {
-            "Authorization": f"Bearer {self.creds.token}",
-        }
-
         url = f"https://admin.googleapis.com/admin/directory/v1/groups/{group}/members"
 
         try:
             # call the Admin SDK Directory API
-            resp = await self.client_session.get(
-                url, headers=headers, raise_for_status=True
+            resp = await authenticated_request(
+                self.creds, url, self.client_session, "GET"
             )
             results = json.loads(await resp.text())
             members = results.get("members", [])
@@ -92,22 +84,14 @@ class UserService:
             users: List of all database users that belong to the Cloud SQL instance.
         """
         # build request to SQL Admin API
-        if not self.creds.valid:
-            request = Request()
-            self.creds.refresh(request)
-
-        headers = {
-            "Authorization": f"Bearer {self.creds.token}",
-        }
-
         project = instance_connection_name.project
         instance = instance_connection_name.instance
         url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project}/instances/{instance}/users"
 
         try:
             # call the SQL Admin API
-            resp = await self.client_session.get(
-                url, headers=headers, raise_for_status=True
+            resp = await authenticated_request(
+                self.creds, url, self.client_session, "GET"
             )
             results = json.loads(await resp.text())
             users = results.get("items", [])
@@ -129,14 +113,6 @@ class UserService:
                 instance='my-instance'))
         """
         # build request to SQL Admin API
-        if not self.creds.valid:
-            request = Request()
-            self.creds.refresh(request)
-
-        headers = {
-            "Authorization": f"Bearer {self.creds.token}",
-        }
-
         project = instance_connection_name.project
         instance = instance_connection_name.instance
         url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project}/instances/{instance}/users"
@@ -144,8 +120,8 @@ class UserService:
 
         try:
             # call the SQL Admin API
-            resp = await self.client_session.post(
-                url, headers=headers, json=user, raise_for_status=True
+            resp = await authenticated_request(
+                self.creds, url, self.client_session, "POST", body=user
             )
             return
         except Exception as e:
@@ -163,6 +139,40 @@ class UserService:
                 await self.client_session.close()
 
         asyncio.run_coroutine_threadsafe(deconstruct(), loop=asyncio.get_event_loop())
+
+
+async def authenticated_request(creds, url, client_session, request_type, body=None):
+    """Helper function to build authenticated aiohttp requests.
+
+    Args:
+        creds: OAuth2 credentials for authorizing requests.
+        url: URL for aiohttp request.
+        client_session: aiohttp ClientSession object.
+        request_type: String determining request type ('GET' or 'POST').
+        body: (optional) JSON body for request.
+
+    Return:
+        Result from aiohttp request.
+    """
+    if not creds.valid:
+        request = Request()
+        creds.refresh(request)
+
+    headers = {
+        "Authorization": f"Bearer {creds.token}",
+    }
+
+    if request_type.upper() == "GET":
+        return await client_session.get(url, headers=headers, raise_for_status=True)
+    elif request_type.upper() == "POST":
+        return await client_session.post(
+            url, headers=headers, json=body, raise_for_status=True
+        )
+    else:
+        raise ValueError(
+            "Request type not recognized! "
+            "Please verify request is type 'GET' or 'POST'."
+        )
 
 
 async def get_users_with_roles(role_service, role):
