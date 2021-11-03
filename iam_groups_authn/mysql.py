@@ -19,6 +19,7 @@ import sqlalchemy
 from google.cloud.sql.connector import connector
 from google.cloud.sql.connector.instance_connection_manager import IPTypes
 from iam_groups_authn.utils import async_wrap
+from google.auth.transport.requests import Request
 
 
 def mysql_username(iam_email):
@@ -137,6 +138,11 @@ def init_connection_engine(instance_connection_name, creds, ip_type=IPTypes.PUBL
         "pool_timeout": 30,  # 30 seconds
         "pool_recycle": 1800,  # 30 minutes
     }
+    # refresh credentials if not valid
+    if not creds.valid:
+        request = Request()
+        creds.refresh(request)
+
     # service account email to access DB, mysql truncates usernames to before '@' sign
     service_account_email = mysql_username(creds.service_account_email)
 

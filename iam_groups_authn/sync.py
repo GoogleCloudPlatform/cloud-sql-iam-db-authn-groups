@@ -14,13 +14,14 @@
 
 # sync.py contains functions for syncing IAM groups with Cloud SQL instances
 
+import asyncio
 from google.auth import iam
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 from iam_groups_authn.mysql import mysql_username
-from iam_groups_authn.utils import async_wrap
+import json
+from aiohttp import ClientSession
+from enum import Enum
 
 # URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
@@ -36,9 +37,11 @@ class UserService:
             creds: OAuth2 credentials to call admin APIs.
         """
         self.creds = creds
+        self.client_session = ClientSession(
+            headers={"Content-Type": "application/json"}
+        )
 
-    @async_wrap
-    def get_group_members(self, group):
+    async def get_group_members(self, group):
         """Get all members of an IAM group.
 
         Given an IAM group, get all members (groups or users) that belong to the
@@ -51,21 +54,23 @@ class UserService:
             members: List of all members (groups or users) that belong to the IAM group.
         """
         # build service to call Admin SDK Directory API
-        service = build("admin", "directory_v1", credentials=self.creds)
+        url = f"https://admin.googleapis.com/admin/directory/v1/groups/{group}/members"
 
         try:
             # call the Admin SDK Directory API
-            results = service.members().list(groupKey=group).execute()
+            resp = await authenticated_request(
+                self.creds, url, self.client_session, RequestType.get
+            )
+            results = json.loads(await resp.text())
             members = results.get("members", [])
             return members
         # handle errors if IAM group does not exist etc.
-        except HttpError as e:
-            raise HttpError(
+        except Exception as e:
+            raise Exception(
                 f"Error: Failed to get IAM members of IAM group `{group}`. Verify group exists and is configured correctly."
             ) from e
 
-    @async_wrap
-    def get_db_users(self, instance_connection_name):
+    async def get_db_users(self, instance_connection_name):
         """Get all database users of a Cloud SQL instance.
 
         Given a database instance and a Google Cloud project, get all the database
@@ -79,17 +84,17 @@ class UserService:
         Returns:
             users: List of all database users that belong to the Cloud SQL instance.
         """
-        # build service to call SQL Admin API
-        service = build("sqladmin", "v1beta4", credentials=self.creds)
+        # build request to SQL Admin API
+        project = instance_connection_name.project
+        instance = instance_connection_name.instance
+        url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project}/instances/{instance}/users"
+
         try:
-            results = (
-                service.users()
-                .list(
-                    project=instance_connection_name.project,
-                    instance=instance_connection_name.instance,
-                )
-                .execute()
+            # call the SQL Admin API
+            resp = await authenticated_request(
+                self.creds, url, self.client_session, RequestType.get
             )
+            results = json.loads(await resp.text())
             users = results.get("items", [])
             return users
         except Exception as e:
@@ -97,7 +102,7 @@ class UserService:
                 f"Error: Failed to get the database users for instance `{instance_connection_name}`. Verify instance connection name and instance details."
             ) from e
 
-    def insert_db_user(self, user_email, instance_connection_name):
+    async def insert_db_user(self, user_email, instance_connection_name):
         """Create DB user from IAM user.
 
         Given an IAM user's email, insert the IAM user as a DB user for Cloud SQL instance.
@@ -108,24 +113,73 @@ class UserService:
                 (e.g. InstanceConnectionName(project='my-project', region='my-region',
                 instance='my-instance'))
         """
-        # build service to call SQL Admin API
-        service = build("sqladmin", "v1beta4", credentials=self.creds)
+        # build request to SQL Admin API
+        project = instance_connection_name.project
+        instance = instance_connection_name.instance
+        url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project}/instances/{instance}/users"
         user = {"name": user_email, "type": "CLOUD_IAM_USER"}
+
         try:
-            results = (
-                service.users()
-                .insert(
-                    project=instance_connection_name.project,
-                    instance=instance_connection_name.instance,
-                    body=user,
-                )
-                .execute()
+            # call the SQL Admin API
+            resp = await authenticated_request(
+                self.creds, url, self.client_session, RequestType.post, body=user
             )
             return
         except Exception as e:
             raise Exception(
                 f"Error: Failed to add IAM user `{user_email}` to Cloud SQL database instance `{instance_connection_name.instance}`."
             ) from e
+
+    def __del__(self):
+        """Deconstructor for UserService to close ClientSession and have
+        graceful exit.
+        """
+
+        async def deconstruct():
+            if not self.client_session.closed:
+                await self.client_session.close()
+
+        asyncio.run_coroutine_threadsafe(deconstruct(), loop=asyncio.get_event_loop())
+
+
+class RequestType(Enum):
+    """Helper class for supported aiohttp request types."""
+
+    get = 1
+    post = 2
+
+
+async def authenticated_request(creds, url, client_session, request_type, body=None):
+    """Helper function to build authenticated aiohttp requests.
+
+    Args:
+        creds: OAuth2 credentials for authorizing requests.
+        url: URL for aiohttp request.
+        client_session: aiohttp ClientSession object.
+        request_type: RequestType enum determining request type.
+        body: (optional) JSON body for request.
+
+    Return:
+        Result from aiohttp request.
+    """
+    if not creds.valid:
+        request = Request()
+        creds.refresh(request)
+
+    headers = {
+        "Authorization": f"Bearer {creds.token}",
+    }
+
+    if request_type == RequestType.get:
+        return await client_session.get(url, headers=headers, raise_for_status=True)
+    elif request_type == RequestType.post:
+        return await client_session.post(
+            url, headers=headers, json=body, raise_for_status=True
+        )
+    else:
+        raise ValueError(
+            "Request type not recognized! " "Please verify RequestType is valid."
+        )
 
 
 async def get_users_with_roles(role_service, role):
