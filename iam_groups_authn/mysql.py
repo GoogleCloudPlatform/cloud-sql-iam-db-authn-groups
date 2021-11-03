@@ -138,7 +138,7 @@ def init_connection_engine(instance_connection_name, creds, ip_type=IPTypes.PUBL
         "pool_timeout": 30,  # 30 seconds
         "pool_recycle": 1800,  # 30 minutes
     }
-    # refresh credentials if need be
+    # refresh credentials if not valid
     if not creds.valid:
         request = Request()
         creds.refresh(request)
