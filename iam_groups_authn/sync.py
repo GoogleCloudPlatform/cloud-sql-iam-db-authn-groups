@@ -22,9 +22,12 @@ from iam_groups_authn.mysql import mysql_username
 import json
 from aiohttp import ClientSession
 from enum import Enum
+import logging
 
 # URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
+# supported database types
+SUPPORTED_DATABASES = ["MYSQL_8_0"]
 
 
 class UserService:
@@ -128,6 +131,49 @@ class UserService:
         except Exception as e:
             raise Exception(
                 f"Error: Failed to add IAM user `{user_email}` to Cloud SQL database instance `{instance_connection_name.instance}`."
+            ) from e
+
+    async def get_database_version(self, instance_connection_name):
+        """Get the database version of a Cloud SQL instance.
+
+        Args:
+            instance_connection_name: InstanceConnectionName namedTuple.
+                (e.g. InstanceConnectionName(project='my-project', region='my-region',
+                instance='my-instance'))
+
+        Returns:
+            database_version: Database version of given Cloud SQL instance.
+        """
+        # build request to SQL Admin API
+        project = instance_connection_name.project
+        region = instance_connection_name.region
+        instance = instance_connection_name.instance
+        url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project}/instances/{instance}"
+
+        try:
+            # call the SQL Admin API
+            resp = await authenticated_request(
+                self.creds, url, self.client_session, RequestType.get
+            )
+            results = json.loads(await resp.text())
+
+            # check if database version is supported
+            database_version = results.get("databaseVersion", None)
+            if database_version not in SUPPORTED_DATABASES:
+                raise ValueError
+            logging.debug(
+                "[%s:%s:%s] Database version found: %s"
+                % (project, region, instance, database_version)
+            )
+            return database_version
+
+        except ValueError as e:
+            raise ValueError(
+                f"Unsupported database version for instance `{instance_connection_name}`. Current supported versions are: {SUPPORTED_DATABASES}"
+            ) from e
+        except Exception as e:
+            raise Exception(
+                f"Error: Failed to get the database version for `{instance_connection_name}`. Verify instance connection name and instance details."
             ) from e
 
     def __del__(self):
