@@ -115,9 +115,7 @@ async def run_groups_authn():
     for instance in sql_instances:
         instance_task = asyncio.create_task(get_instance_users(user_service, instance))
         database_version_task = asyncio.create_task(
-            user_service.get_database_version(
-                InstanceConnectionName(*instance.split(":"))
-            )
+            user_service.verify_db_version(InstanceConnectionName(*instance.split(":")))
         )
         instance_tasks[instance] = (instance_task, database_version_task)
 

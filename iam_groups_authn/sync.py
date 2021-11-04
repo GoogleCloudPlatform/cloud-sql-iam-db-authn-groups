@@ -133,8 +133,8 @@ class UserService:
                 f"Error: Failed to add IAM user `{user_email}` to Cloud SQL database instance `{instance_connection_name.instance}`."
             ) from e
 
-    async def get_database_version(self, instance_connection_name):
-        """Get the database version of a Cloud SQL instance.
+    async def verify_db_version(self, instance_connection_name):
+        """Verify database version of a Cloud SQL instance is supported.
 
         Args:
             instance_connection_name: InstanceConnectionName namedTuple.
