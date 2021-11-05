@@ -128,7 +128,6 @@ Replace the following values:
 gcloud projects add-iam-policy-binding <PROJECT_ID> \
     --member="group:<IAM_GROUP_EMAIL>" \
     --role="roles/cloudsql.instanceUser"
-
 ```
 
 **NOTE**: The above command is required for each IAM group and the binding is added at the project level. Therefore, if an IAM group is being synced with Cloud SQL instances across several different projects, the command will need to be run for each project.
