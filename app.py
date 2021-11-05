@@ -25,7 +25,11 @@ from iam_groups_authn.sync import (
     grant_iam_group_role,
     UserService,
 )
-from iam_groups_authn.sql_admin import get_instance_users, add_missing_db_users
+from iam_groups_authn.sql_admin import (
+    get_instance_users,
+    add_missing_db_users,
+    InstanceConnectionName,
+)
 from iam_groups_authn.iam_admin import get_iam_users
 from iam_groups_authn.mysql import init_connection_engine, RoleService, mysql_username
 
@@ -34,6 +38,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/admin.directory.group.member.readonly",
     "https://www.googleapis.com/auth/sqlservice.admin",
 ]
+# supported database types
+SUPPORTED_DATABASES = ["MYSQL_8_0"]
 
 app = Quart(__name__)
 
@@ -110,15 +116,31 @@ async def run_groups_authn():
 
     for instance in sql_instances:
         instance_task = asyncio.create_task(get_instance_users(user_service, instance))
-        instance_tasks[instance] = instance_task
+        database_version_task = asyncio.create_task(
+            user_service.get_database_version(
+                InstanceConnectionName(*instance.split(":"))
+            )
+        )
+        instance_tasks[instance] = (instance_task, database_version_task)
 
     # create pairings of iam groups and instances
     for group in iam_groups:
         for instance in sql_instances:
+
+            # get database version of instance and check if supported
+            database_version = await instance_tasks[instance][1]
+            if database_version not in SUPPORTED_DATABASES:
+                raise ValueError(
+                    f"Unsupported database version for instance `{instance}`. Current supported versions are: {SUPPORTED_DATABASES}"
+                )
+
             # add missing IAM group members to database
             add_users_task = asyncio.create_task(
                 add_missing_db_users(
-                    user_service, group_tasks[group], instance_tasks[instance], instance
+                    user_service,
+                    group_tasks[group],
+                    instance_tasks[instance][0],
+                    instance,
                 )
             )
 
