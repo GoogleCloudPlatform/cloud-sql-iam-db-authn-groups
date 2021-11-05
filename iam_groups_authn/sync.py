@@ -26,8 +26,6 @@ import logging
 
 # URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
-# supported database types
-SUPPORTED_DATABASES = ["MYSQL_8_0"]
 
 
 class UserService:
@@ -133,8 +131,8 @@ class UserService:
                 f"Error: Failed to add IAM user `{user_email}` to Cloud SQL database instance `{instance_connection_name.instance}`."
             ) from e
 
-    async def verify_db_version(self, instance_connection_name):
-        """Verify database version of a Cloud SQL instance is supported.
+    async def get_database_version(self, instance_connection_name):
+        """Get database version of a Cloud SQL instance.
 
         Args:
             instance_connection_name: InstanceConnectionName namedTuple.
@@ -156,21 +154,12 @@ class UserService:
                 self.creds, url, self.client_session, RequestType.get
             )
             results = json.loads(await resp.text())
-
-            # check if database version is supported
-            database_version = results.get("databaseVersion", None)
-            if database_version not in SUPPORTED_DATABASES:
-                raise ValueError
+            database_version = results.get("databaseVersion")
             logging.debug(
                 "[%s:%s:%s] Database version found: %s"
                 % (project, region, instance, database_version)
             )
             return database_version
-
-        except ValueError as e:
-            raise ValueError(
-                f"Unsupported database version for instance `{instance_connection_name}`. Current supported versions are: {SUPPORTED_DATABASES}"
-            ) from e
         except Exception as e:
             raise Exception(
                 f"Error: Failed to get the database version for `{instance_connection_name}`. Verify instance connection name and instance details."

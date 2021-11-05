@@ -38,6 +38,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/admin.directory.group.member.readonly",
     "https://www.googleapis.com/auth/sqlservice.admin",
 ]
+# supported database types
+SUPPORTED_DATABASES = ["MYSQL_8_0"]
 
 app = Quart(__name__)
 
@@ -115,15 +117,23 @@ async def run_groups_authn():
     for instance in sql_instances:
         instance_task = asyncio.create_task(get_instance_users(user_service, instance))
         database_version_task = asyncio.create_task(
-            user_service.verify_db_version(InstanceConnectionName(*instance.split(":")))
+            user_service.get_database_version(
+                InstanceConnectionName(*instance.split(":"))
+            )
         )
         instance_tasks[instance] = (instance_task, database_version_task)
 
     # create pairings of iam groups and instances
     for group in iam_groups:
         for instance in sql_instances:
-            # get database version of instance
+
+            # get database version of instance and check if supported
             database_version = await instance_tasks[instance][1]
+            if database_version not in SUPPORTED_DATABASES:
+                raise ValueError(
+                    f"Unsupported database version for instance `{instance}`. Current supported versions are: {SUPPORTED_DATABASES}"
+                )
+
             # add missing IAM group members to database
             add_users_task = asyncio.create_task(
                 add_missing_db_users(
