@@ -86,12 +86,8 @@ async def run_groups_authn():
         )
 
     # optional param to change log level
-    log_level = body.get("log_level")
-    if (
-        log_level is not None
-        and type(log_level) is str
-        and log_level.upper() in log_levels
-    ):
+    log_level = body.get("log_level", "INFO")
+    if type(log_level) is str and log_level.upper() in log_levels:
         logging.getLogger().setLevel(log_levels[log_level.upper()])
 
     # set ip_type to proper type for connector
