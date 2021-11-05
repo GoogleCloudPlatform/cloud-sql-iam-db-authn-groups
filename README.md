@@ -38,7 +38,7 @@ Make sure the desired Google Cloud project is set. ([Creating a project](https:/
 Replace the following values:
 - `PROJECT_ID`: The Google Cloud project ID.
 ```
-gcloud config set project PROJECT_ID
+gcloud config set project <PROJECT_ID>
 ```
 
 ### Enabling APIs
@@ -114,6 +114,23 @@ gcloud projects add-iam-policy-binding <PROJECT_ID> \
 To properly allow read-access of an organization's IAM group members (i.e. which IAM users belong within a specific IAM group) within the service, we need to assign the Google Workspace Group Administrator Role to the service account created above. This will allow the service account to properly call the [List Members Discovery API](https://developers.google.com/admin-sdk/directory/reference/rest/v1/members/list) to keep track of the IAM members being managed through this service.
 
 To assign the Group Administator Role to the service account follow these four quick steps. ([How to Assign Group Administrator Role](https://cloud.google.com/identity/docs/how-to/setup#auth-no-dwd))
+
+### Configuring IAM Groups
+There is one step required for configuring IAM groups to be able to sync successfully with Cloud SQL instances. Each IAM group requires an IAM policy binding to allow it's IAM users to inherit the ability to connect and login to Cloud SQL instances when added as database users.
+
+Add the required __Cloud SQL Instance User__ IAM policy binding through the following command or manually through the [Cloud Console](https://console.cloud.google.com/iam-admin/iam) by adding the __IAM group's email__ as the principal and selecting the __"Cloud SQL Instance User"__ role.
+
+Replace the following values:
+- `PROJECT_ID`: The Google Cloud project ID.
+- `IAM_GROUP_EMAIL`: The email address associated with the IAM group.
+
+```
+gcloud projects add-iam-policy-binding <PROJECT_ID> \
+    --member="group:<IAM_GROUP_EMAIL>" \
+    --role="roles/cloudsql.instanceUser"
+```
+
+**NOTE**: The above command is required for each IAM group and the binding is added at the project level. Therefore, if an IAM group is being synced with Cloud SQL instances across several different projects, the command will need to be run for each project.
 
 ### Configuring Cloud SQL Instances
 This service requires Cloud SQL instances to be already created and to have the `cloudsql_iam_authentication` flag turned **On**. [(See how to enable flag here.)](https://cloud.google.com/sql/docs/mysql/create-edit-iam-instances)
