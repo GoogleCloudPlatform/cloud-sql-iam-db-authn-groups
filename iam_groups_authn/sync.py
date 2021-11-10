@@ -18,7 +18,7 @@ import asyncio
 from google.auth import iam
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
-from iam_groups_authn.mysql import mysql_username
+from iam_groups_authn.database import DatabaseVersion, mysql_username
 import json
 from aiohttp import ClientSession
 from enum import Enum
@@ -275,7 +275,7 @@ def get_credentials(creds, scopes):
     return updated_credentials
 
 
-def get_users_to_add(iam_users, db_users):
+def get_users_to_add(iam_users, db_users, database_type):
     """Find IAM users who are missing as DB users.
 
     Given a list of IAM users, and a list database users, find the IAM users
@@ -284,13 +284,17 @@ def get_users_to_add(iam_users, db_users):
     Args:
         iam_users: List of that group's IAM users. (e.g. ["user1", "user2", "user3"])
         db_users: List of an instance's database users. (e.g. ["db-user1", "db-user2"])
+        database_type: Enum specifying type of database.
 
     Returns:
         missing_db_users: Set of names of DB user's needing to be inserted into instance.
     """
-    missing_db_users = [
-        user for user in iam_users if mysql_username(user) not in db_users
-    ]
+    if database_type == DatabaseVersion.mysql:
+        missing_db_users = [
+            user for user in iam_users if mysql_username(user) not in db_users
+        ]
+    else:
+        missing_db_users = [user for user in iam_users if user not in db_users]
     return set(missing_db_users)
 
 
@@ -312,13 +316,16 @@ async def revoke_iam_group_role(
     iam_users = await iam_users_future
     users_with_roles = await users_with_roles_future
 
-    # truncate mysql_usernames
-    mysql_usernames = [mysql_username(user) for user in iam_users]
+    if role_service.database_type == DatabaseVersion.mysql:
+        # truncate mysql_usernames
+        usernames = [mysql_username(user) for user in iam_users]
+    else:
+        usernames = iam_users
     # get list of users who have group role but are not in IAM group
     users_to_revoke = [
         user_with_role
         for user_with_role in users_with_roles
-        if user_with_role not in mysql_usernames
+        if user_with_role not in usernames
     ]
     # revoke group role from users no longer in IAM group
     await role_service.revoke_group_role(role, users_to_revoke)
@@ -344,11 +351,14 @@ async def grant_iam_group_role(
     iam_users = await iam_users_future
     users_with_roles = await users_with_roles_future
 
-    # truncate mysql_usernames
-    mysql_usernames = [mysql_username(user) for user in iam_users]
+    if role_service.database_type == DatabaseVersion.mysql:
+        # truncate mysql_usernames
+        usernames = [mysql_username(user) for user in iam_users]
+    else:
+        usernames = iam_users
     # find DB users who are part of IAM group that need role granted to them
     users_to_grant = [
-        username for username in mysql_usernames if username not in users_with_roles
+        username for username in usernames if username not in users_with_roles
     ]
     await role_service.grant_group_role(role, users_to_grant)
 

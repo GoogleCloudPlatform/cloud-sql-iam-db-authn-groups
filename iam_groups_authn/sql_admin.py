@@ -57,7 +57,7 @@ async def get_instance_users(user_service, instance_connection_name):
 
 
 async def add_missing_db_users(
-    user_service, iam_future, db_future, instance_connection_name
+    user_service, iam_future, db_future, instance_connection_name, database_type
 ):
     """Add missing IAM users as database users on instance.
 
@@ -67,10 +67,11 @@ async def add_missing_db_users(
         db_future: Future for list of DB users on Cloud SQL database instance.
         instance_connection_name: Cloud SQL instance connection name.
             (e.g., "my-project:my-region:my-instance")
+        database_type: Enum specifying type of database.
     """
     iam_users, db_users = await iam_future, await db_future
     # find IAM users who are missing as DB users
-    missing_db_users = get_users_to_add(iam_users, db_users)
+    missing_db_users = get_users_to_add(iam_users, db_users, database_type)
     # add missing users to database instance
     for user in missing_db_users:
         await user_service.insert_db_user(

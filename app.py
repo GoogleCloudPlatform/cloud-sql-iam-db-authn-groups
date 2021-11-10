@@ -31,7 +31,12 @@ from iam_groups_authn.sql_admin import (
     InstanceConnectionName,
 )
 from iam_groups_authn.iam_admin import get_iam_users
-from iam_groups_authn.mysql import init_connection_engine, RoleService, mysql_username
+from iam_groups_authn.database import (
+    init_connection_engine,
+    RoleService,
+    mysql_username,
+    DatabaseVersion,
+)
 
 # define scopes
 SCOPES = [
@@ -39,7 +44,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/sqlservice.admin",
 ]
 # supported database types
-SUPPORTED_DATABASES = ["MYSQL_8_0"]
+SUPPORTED_DATABASES = ["MYSQL_8_0", "POSTGRES_13"]
 
 app = Quart(__name__)
 
@@ -130,6 +135,12 @@ async def run_groups_authn():
                     f"Unsupported database version for instance `{instance}`. Current supported versions are: {SUPPORTED_DATABASES}"
                 )
 
+            # check if database is MYSQL or POSTGRES
+            if database_version.startswith("MYSQL"):
+                database_type = DatabaseVersion.mysql
+            else:
+                database_type = DatabaseVersion.postgres
+
             # add missing IAM group members to database
             add_users_task = asyncio.create_task(
                 add_missing_db_users(
@@ -137,12 +148,13 @@ async def run_groups_authn():
                     group_tasks[group],
                     instance_tasks[instance][0],
                     instance,
+                    database_type,
                 )
             )
 
-            # initialize database engine
-            db = init_connection_engine(instance, updated_creds, ip_type)
-            role_service = RoleService(db)
+            # initialize Postgres database engine
+            db = init_connection_engine(instance, updated_creds, database_type, ip_type)
+            role_service = RoleService(db, database_type)
 
             # verify role for IAM group exists on database, create if does not exist
             role = mysql_username(group)
