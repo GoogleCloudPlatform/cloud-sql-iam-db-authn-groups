@@ -4,7 +4,7 @@
 This project is a self-deployed service that provides support for managing [Cloud SQL IAM Database Authentication](https://cloud.google.com/sql/docs/mysql/authentication) for groups. This service leverages [Cloud Run](https://cloud.google.com/run), [Cloud Scheduler](https://cloud.google.com/scheduler), and the [Cloud SQL Python Connector](https://github.com/googlecloudplatform/cloud-sql-python-connector) to consistently update and sync Cloud SQL instances based on IAM groups. It will create missing database IAM users, GRANT roles to database IAM users based on their IAM groups, and REVOKE roles from database IAM users no longer in IAM groups.
 
 ## Supported Databases
-Currently only **MySQL 8.0** databases are supported.
+Currently only **MySQL 8.0** and **PostgreSQL 13** databases are supported.
 
 ## Overview
 The Cloud SQL IAM Database Authentication for Groups service at an overview is made of Cloud Scheduler Job(s) and Cloud Run instance(s). 
@@ -141,7 +141,7 @@ To properly manage the database users on each Cloud SQL instance that is configu
 Add the service account as an IAM authenticated database user on each Cloud SQL instance that needs managing through IAM groups. Can be done both manually through the Google Cloud Console or through the following `gcloud` command.
 
 Replace the following values:
-- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account.
+- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account. (**NOTE**: For Postgres instances, remove the `.gserviceaccount.com` suffix from service account email.)
 - `INSTANCE_NAME`: The name of a Cloud SQL instance.
 ```
 gcloud sql users create <SERVICE_ACCOUNT_EMAIL> \
@@ -156,7 +156,8 @@ Connect to all Cloud SQL instances in question with an admin user or another dat
 
 Once connected, grant the service account IAM database user the following permissions:
 
-Replace the following values in the above commands:
+##### MySQL Instance
+Replace the following values in the below commands:
 - `SERVICE_ACCOUNT_ID`: The ID (name) for the service account (everything before the **@** portion of email)
 Allow the service account to read database users and their roles.
 ```
@@ -171,6 +172,15 @@ GRANT CREATE ROLE ON *.* TO '<SERVICE_ACCOUNT_ID>';
 Allow the service account to **GRANT/REVOKE** roles to users through being a **ROLE_ADMIN**.
 ```
 GRANT ROLE_ADMIN ON *.* TO '<SERVICE_ACCOUNT_ID>';
+```
+
+##### PostgreSQL Instance
+Postgres allows a role or user to easily be granted the appropriate permissions for **CREATE**, and **GRANT/REVOKE** that are needed for creating and managing the group roles for IAM groups with one single command.
+
+Replace the following values:
+- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account with the `.gserviceaccount.com` suffix removed.
+```
+ALTER ROLE "<SERVICE_ACCOUNT_EMAIL>" WITH CREATEROLE;
 ```
 
 ## Deploying to Cloud Run
