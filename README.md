@@ -156,7 +156,7 @@ Connect to all Cloud SQL instances in question with an admin user or another dat
 
 Once connected, grant the service account IAM database user the following permissions:
 
-##### MySQL Instance
+#### MySQL Instance
 Replace the following values in the below commands:
 - `SERVICE_ACCOUNT_ID`: The ID (name) for the service account (everything before the **@** portion of email)
 Allow the service account to read database users and their roles.
@@ -174,7 +174,7 @@ Allow the service account to **GRANT/REVOKE** roles to users through being a **R
 GRANT ROLE_ADMIN ON *.* TO '<SERVICE_ACCOUNT_ID>';
 ```
 
-##### PostgreSQL Instance
+#### PostgreSQL Instance
 Postgres allows a role or user to easily be granted the appropriate permissions for **CREATE**, and **GRANT/REVOKE** that are needed for creating and managing the group roles for IAM groups with one single command.
 
 Replace the following values:
