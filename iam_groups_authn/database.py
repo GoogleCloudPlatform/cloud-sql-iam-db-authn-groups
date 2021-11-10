@@ -24,6 +24,8 @@ from enum import Enum
 
 
 class DatabaseVersion(Enum):
+    """Enum class for database version."""
+
     mysql = "mysql"
     postgres = "postgresql"
 

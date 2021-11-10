@@ -152,7 +152,7 @@ async def run_groups_authn():
                 )
             )
 
-            # initialize Postgres database engine
+            # initialize database connection pool
             db = init_connection_engine(instance, updated_creds, database_type, ip_type)
             role_service = RoleService(db, database_type)
 
