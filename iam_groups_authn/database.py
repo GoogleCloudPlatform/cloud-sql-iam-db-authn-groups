@@ -103,7 +103,7 @@ class RoleService:
         # else create postgresql query
         else:
             check_stmt = sqlalchemy.text("SELECT 1 FROM pg_roles WHERE rolname= :role")
-            stmt = sqlalchemy.text(f"CREATE ROLE {role}")
+            stmt = sqlalchemy.text(f'CREATE ROLE "{role}"')
             # create connection to db instance
             with self.db.connect() as db_connection:
                 # check if role already exists
