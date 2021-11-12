@@ -72,9 +72,9 @@ async def add_missing_db_users(
     iam_users, db_users = await iam_future, await db_future
     # find IAM users who are missing as DB users
     if database_type == "mysql":
-        missing_db_users = [
-            user for user in iam_users if mysql_username(user) not in db_users
-        ]
+        missing_db_users = set(
+            [user for user in iam_users if mysql_username(user) not in db_users]
+        )
     else:
         missing_db_users = set([user for user in iam_users if user not in db_users])
     # add missing users to database instance
