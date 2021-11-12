@@ -18,7 +18,7 @@ import asyncio
 from google.auth import iam
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
-from iam_groups_authn.database import DatabaseVersion, mysql_username
+from iam_groups_authn.mysql import mysql_username
 import json
 from aiohttp import ClientSession
 from enum import Enum
@@ -275,34 +275,12 @@ def get_credentials(creds, scopes):
     return updated_credentials
 
 
-def get_users_to_add(iam_users, db_users, database_type):
-    """Find IAM users who are missing as DB users.
-
-    Given a list of IAM users, and a list database users, find the IAM users
-    who are missing their corresponding DB user.
-
-    Args:
-        iam_users: List of that group's IAM users. (e.g. ["user1", "user2", "user3"])
-        db_users: List of an instance's database users. (e.g. ["db-user1", "db-user2"])
-        database_type: Enum specifying type of database.
-
-    Returns:
-        missing_db_users: Set of names of DB user's needing to be inserted into instance.
-    """
-    if database_type == DatabaseVersion.mysql:
-        missing_db_users = [
-            user for user in iam_users if mysql_username(user) not in db_users
-        ]
-    else:
-        missing_db_users = [user for user in iam_users if user not in db_users]
-    return set(missing_db_users)
-
-
 async def revoke_iam_group_role(
     role_service,
     role,
     users_with_roles_future,
     iam_users_future,
+    database_type,
 ):
     """Revoke IAM group role from database users no longer in IAM group.
 
@@ -311,12 +289,13 @@ async def revoke_iam_group_role(
         role: IAM group role.
         users_with_roles_future: Future for list of database users who have group role.
         iam_users_future: Future for list of IAM users in IAM group.
+        database_type: Type of database.
     """
     # await dependent tasks
     iam_users = await iam_users_future
     users_with_roles = await users_with_roles_future
 
-    if role_service.database_type == DatabaseVersion.mysql:
+    if database_type == "mysql":
         # truncate mysql_usernames
         usernames = [mysql_username(user) for user in iam_users]
     else:
@@ -338,6 +317,7 @@ async def grant_iam_group_role(
     role,
     users_with_roles_future,
     iam_users_future,
+    database_type,
 ):
     """Grant IAM group role to IAM database users missing it.
 
@@ -346,12 +326,13 @@ async def grant_iam_group_role(
         role: IAM group role.
         users_with_roles_future: Future for list of database users who have group role.
         iam_users_future: Future for list of IAM users in IAM group.
+        database_type: Type of database.
     """
     # await dependent tasks
     iam_users = await iam_users_future
     users_with_roles = await users_with_roles_future
 
-    if role_service.database_type == DatabaseVersion.mysql:
+    if database_type == "mysql":
         # truncate mysql_usernames
         usernames = [mysql_username(user) for user in iam_users]
     else:

@@ -15,7 +15,7 @@
 # sql_admin.py contains functions for interacting with the SQL Admin API
 
 from typing import NamedTuple
-from iam_groups_authn.sync import get_users_to_add
+from iam_groups_authn.mysql import mysql_username
 
 
 class InstanceConnectionName(NamedTuple):
@@ -67,11 +67,16 @@ async def add_missing_db_users(
         db_future: Future for list of DB users on Cloud SQL database instance.
         instance_connection_name: Cloud SQL instance connection name.
             (e.g., "my-project:my-region:my-instance")
-        database_type: Enum specifying type of database.
+        database_type: Type of database for Cloud SQL instance.
     """
     iam_users, db_users = await iam_future, await db_future
     # find IAM users who are missing as DB users
-    missing_db_users = get_users_to_add(iam_users, db_users, database_type)
+    if database_type == "mysql":
+        missing_db_users = [
+            user for user in iam_users if mysql_username(user) not in db_users
+        ]
+    else:
+        missing_db_users = set([user for user in iam_users if user not in db_users])
     # add missing users to database instance
     for user in missing_db_users:
         await user_service.insert_db_user(

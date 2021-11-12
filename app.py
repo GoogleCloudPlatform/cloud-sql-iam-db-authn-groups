@@ -31,11 +31,15 @@ from iam_groups_authn.sql_admin import (
     InstanceConnectionName,
 )
 from iam_groups_authn.iam_admin import get_iam_users
-from iam_groups_authn.database import (
-    init_connection_engine,
-    RoleService,
+from iam_groups_authn.utils import DatabaseVersion
+from iam_groups_authn.mysql import (
+    init_mysql_connection_engine,
+    MysqlRoleService,
     mysql_username,
-    DatabaseVersion,
+)
+from iam_groups_authn.postgres import (
+    init_postgres_connection_engine,
+    PostgresRoleService,
 )
 
 # define scopes
@@ -44,7 +48,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/sqlservice.admin",
 ]
 # supported database types
-SUPPORTED_DATABASES = ["MYSQL_8_0", "POSTGRES_13"]
+SUPPORTED_DATABASES = list(DatabaseVersion.__members__.keys())
 
 app = Quart(__name__)
 
@@ -134,12 +138,8 @@ async def run_groups_authn():
                 raise ValueError(
                     f"Unsupported database version for instance `{instance}`. Current supported versions are: {SUPPORTED_DATABASES}"
                 )
-
-            # check if database is MYSQL or POSTGRES
-            if database_version.startswith("MYSQL"):
-                database_type = DatabaseVersion.mysql
             else:
-                database_type = DatabaseVersion.postgres
+                database_version = DatabaseVersion[database_version]
 
             # add missing IAM group members to database
             add_users_task = asyncio.create_task(
@@ -148,13 +148,21 @@ async def run_groups_authn():
                     group_tasks[group],
                     instance_tasks[instance][0],
                     instance,
-                    database_type,
+                    database_version.value,
                 )
             )
 
             # initialize database connection pool
-            db = init_connection_engine(instance, updated_creds, database_type, ip_type)
-            role_service = RoleService(db, database_type)
+            if database_version.value == "mysql":
+                db = init_mysql_connection_engine(instance, updated_creds, ip_type)
+                role_service = MysqlRoleService(db)
+            else:
+                db = init_postgres_connection_engine(instance, updated_creds, ip_type)
+                role_service = PostgresRoleService(db)
+            logging.debug(
+                "[%s][%s] Initialized a %s connection pool."
+                % (instance, group, database_version.value)
+            )
 
             # verify role for IAM group exists on database, create if does not exist
             role = mysql_username(group)
@@ -188,6 +196,7 @@ async def run_groups_authn():
                     role,
                     users_with_roles_task,
                     group_tasks[group],
+                    database_version.value,
                 )
             )
 
@@ -198,6 +207,7 @@ async def run_groups_authn():
                     role,
                     users_with_roles_task,
                     group_tasks[group],
+                    database_version.value,
                 )
             )
             results = await asyncio.gather(

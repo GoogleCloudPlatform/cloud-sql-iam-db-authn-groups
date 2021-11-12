@@ -16,6 +16,7 @@
 
 import asyncio
 from functools import partial, wraps
+from enum import Enum
 
 
 def async_wrap(func):
@@ -33,3 +34,29 @@ def async_wrap(func):
         return await loop.run_in_executor(executor, pfunc)
 
     return run
+
+
+class DatabaseVersion(Enum):
+    """Enum class for database version."""
+
+    MYSQL_8_0 = "mysql"
+    POSTGRES_13 = "postgresql"
+
+
+class RoleService:
+    """Interface for managing a database and it's group roles."""
+
+    def __init__(self, db):
+        pass
+
+    def fetch_role_grants(self, group_name):
+        pass
+
+    def create_group_role(self, role):
+        pass
+
+    def grant_group_role(self, role, users):
+        pass
+
+    def revoke_group_role(self, role, users):
+        pass
