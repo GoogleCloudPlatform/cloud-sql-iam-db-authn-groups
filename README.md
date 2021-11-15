@@ -201,7 +201,7 @@ gcloud builds submit \
 Deploy Cloud Run Service from container image:
 
 Replace the following values:
-- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account.
+- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account created above.
 - `PROJECT_ID`: The Google Cloud project ID.
 ```
 gcloud run deploy iam-db-authn-groups \
@@ -246,7 +246,7 @@ An example command creating a Cloud Scheduler job to run the IAM database authen
 Replace the following values:
 - `JOB_NAME`: The name for the Cloud Scheduler job.
 - `SERVICE_URL`: The service URL of the Cloud Run service.
-- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account.
+- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account created above.
 - `PATH_TO_PAYLOAD`: Path to payload JSON file.
 ```
 gcloud scheduler jobs create http \
@@ -276,7 +276,7 @@ The name of the mapped IAM group database role is the email of the IAM group wit
 
 The service verifies that a group role exists or creates one on the database if it does not exist. It is recommended to configure the Cloud Scheduler job(s) and after having it triggered **at least** once, have a Database Administrator or project admin verify the creation of the group roles and **GRANT** the group roles the appropriate privileges on each Cloud SQL instance that should be inherited by database users of those IAM groups on all consecutive Cloud Scheduler runs. 
 
-To verify the creation of group roles after Cloud Scheduler has triggered at least once, the following command can be run:
+To verify the creation of group roles after Cloud Scheduler has triggered at least once, the following command can be run for **MySQL** instances (**PostgreSQL** instances require connecting to the database to verify):
 
 Replace the following values:
 - `INSTANCE_NAME`: The name of a Cloud SQL instance that was configured in the Cloud Scheduler JSON payload.
