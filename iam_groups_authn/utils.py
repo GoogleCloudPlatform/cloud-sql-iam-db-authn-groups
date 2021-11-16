@@ -41,6 +41,10 @@ class DatabaseVersion(Enum):
 
     MYSQL_8_0 = "mysql"
     POSTGRES_13 = "postgresql"
+    POSTGRES_12 = "postgresql"
+    POSTGRES_11 = "postgresql"
+    POSTGRES_10 = "postgresql"
+    POSTGRES_9_6 = "postgresql"
 
 
 class RoleService:
