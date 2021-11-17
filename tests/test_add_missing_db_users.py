@@ -15,6 +15,7 @@
 import pytest
 import asyncio
 from iam_groups_authn.sql_admin import add_missing_db_users
+from iam_groups_authn.utils import DatabaseVersion
 
 
 class FakeUserService:
@@ -41,11 +42,19 @@ async def test_no_missing_users():
     postgres_users.set_result(["user1@test.com", "user2@test.com"])
 
     missing_mysql_users = await add_missing_db_users(
-        user_service, iam_future, mysql_users, "group:region:instance", "mysql"
+        user_service,
+        iam_future,
+        mysql_users,
+        "group:region:instance",
+        DatabaseVersion.MYSQL_8_0,
     )
     assert missing_mysql_users == set()
     missing_postgres_users = await add_missing_db_users(
-        user_service, iam_future, postgres_users, "group:region:instance", "postgresql"
+        user_service,
+        iam_future,
+        postgres_users,
+        "group:region:instance",
+        DatabaseVersion.POSTGRES_13,
     )
     assert missing_postgres_users == set()
 
@@ -64,12 +73,20 @@ async def test_missing__users():
     mysql_users.set_result(["user1"])
 
     missing_iam_users = await add_missing_db_users(
-        user_service, iam_future, postgres_users, "group:region:instance", "postgresql"
+        user_service,
+        iam_future,
+        postgres_users,
+        "group:region:instance",
+        DatabaseVersion.POSTGRES_13,
     )
     assert missing_iam_users == set(["user2@test.com", "user3@test.com"])
 
     missing_iam_users = await add_missing_db_users(
-        user_service, iam_future, mysql_users, "group:region:instance", "mysql"
+        user_service,
+        iam_future,
+        mysql_users,
+        "group:region:instance",
+        DatabaseVersion.MYSQL_8_0,
     )
     assert missing_iam_users == set(["user2@test.com", "user3@test.com"])
 
@@ -88,11 +105,19 @@ async def test_no_iam_users():
     mysql_users.set_result(["user1"])
 
     missing_iam_users = await add_missing_db_users(
-        user_service, iam_future, postgres_users, "group:region:instance", "postgresql"
+        user_service,
+        iam_future,
+        postgres_users,
+        "group:region:instance",
+        DatabaseVersion.POSTGRES_13,
     )
     assert missing_iam_users == set()
     missing_iam_users = await add_missing_db_users(
-        user_service, iam_future, mysql_users, "group:region:instance", "mysql"
+        user_service,
+        iam_future,
+        mysql_users,
+        "group:region:instance",
+        DatabaseVersion.MYSQL_8_0,
     )
     assert missing_iam_users == set()
 
@@ -109,10 +134,18 @@ async def test_no_database_users():
     users.set_result([])
 
     missing_iam_users = await add_missing_db_users(
-        user_service, iam_future, users, "group:region:instance", "postgresql"
+        user_service,
+        iam_future,
+        users,
+        "group:region:instance",
+        DatabaseVersion.POSTGRES_13,
     )
     assert missing_iam_users == set(["user1@test.com", "user2@test.com"])
     missing_iam_users = await add_missing_db_users(
-        user_service, iam_future, users, "group:region:instance", "mysql"
+        user_service,
+        iam_future,
+        users,
+        "group:region:instance",
+        DatabaseVersion.MYSQL_8_0,
     )
     assert missing_iam_users == set(["user1@test.com", "user2@test.com"])

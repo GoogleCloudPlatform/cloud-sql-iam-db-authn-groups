@@ -47,8 +47,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/admin.directory.group.member.readonly",
     "https://www.googleapis.com/auth/sqlservice.admin",
 ]
-# supported database types
-SUPPORTED_DATABASES = list(DatabaseVersion.__members__.keys())
 
 app = Quart(__name__)
 
@@ -134,12 +132,12 @@ async def run_groups_authn():
 
             # get database version of instance and check if supported
             database_version = await instance_tasks[instance][1]
-            if database_version not in SUPPORTED_DATABASES:
+            try:
+                database_version = DatabaseVersion(database_version)
+            except ValueError as e:
                 raise ValueError(
-                    f"Unsupported database version for instance `{instance}`. Current supported versions are: {SUPPORTED_DATABASES}"
-                )
-            else:
-                database_version = DatabaseVersion[database_version]
+                    f"Unsupported database version for instance `{instance}`. Current supported versions are: {list(DatabaseVersion.__members__.keys())}"
+                ) from e
 
             # add missing IAM group members to database
             add_users_task = asyncio.create_task(
@@ -148,12 +146,12 @@ async def run_groups_authn():
                     group_tasks[group],
                     instance_tasks[instance][0],
                     instance,
-                    database_version.value,
+                    database_version,
                 )
             )
 
             # initialize database connection pool
-            if database_version.value == "mysql":
+            if database_version.is_mysql():
                 db = init_mysql_connection_engine(instance, updated_creds, ip_type)
                 role_service = MysqlRoleService(db)
             else:
@@ -196,7 +194,7 @@ async def run_groups_authn():
                     role,
                     users_with_roles_task,
                     group_tasks[group],
-                    database_version.value,
+                    database_version,
                 )
             )
 
@@ -207,7 +205,7 @@ async def run_groups_authn():
                     role,
                     users_with_roles_task,
                     group_tasks[group],
-                    database_version.value,
+                    database_version,
                 )
             )
             results = await asyncio.gather(

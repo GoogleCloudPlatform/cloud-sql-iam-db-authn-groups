@@ -292,19 +292,19 @@ async def revoke_iam_group_role(
         database_type: Type of database.
     """
     # await dependent tasks
-    iam_users = await iam_users_future
-    users_with_roles = await users_with_roles_future
+    iam_users, users_with_roles = await asyncio.gather(
+        iam_users_future, users_with_roles_future
+    )
 
-    if database_type == "mysql":
+    if database_type.is_mysql():
         # truncate mysql_usernames
-        usernames = [mysql_username(user) for user in iam_users]
-    else:
-        usernames = iam_users
+        iam_users = [mysql_username(user) for user in iam_users]
+
     # get list of users who have group role but are not in IAM group
     users_to_revoke = [
         user_with_role
         for user_with_role in users_with_roles
-        if user_with_role not in usernames
+        if user_with_role not in iam_users
     ]
     # revoke group role from users no longer in IAM group
     await role_service.revoke_group_role(role, users_to_revoke)
@@ -329,18 +329,16 @@ async def grant_iam_group_role(
         database_type: Type of database.
     """
     # await dependent tasks
-    iam_users = await iam_users_future
-    users_with_roles = await users_with_roles_future
+    iam_users, users_with_roles = await asyncio.gather(
+        iam_users_future, users_with_roles_future
+    )
 
-    if database_type == "mysql":
+    if database_type.is_mysql():
         # truncate mysql_usernames
-        usernames = [mysql_username(user) for user in iam_users]
-    else:
-        usernames = iam_users
+        iam_users = [mysql_username(user) for user in iam_users]
+
     # find DB users who are part of IAM group that need role granted to them
-    users_to_grant = [
-        username for username in usernames if username not in users_with_roles
-    ]
+    users_to_grant = [user for user in iam_users if user not in users_with_roles]
     await role_service.grant_group_role(role, users_to_grant)
 
     return users_to_grant

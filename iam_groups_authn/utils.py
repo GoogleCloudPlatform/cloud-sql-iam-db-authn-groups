@@ -17,6 +17,7 @@
 import asyncio
 from functools import partial, wraps
 from enum import Enum
+from abc import ABC, abstractmethod
 
 
 def async_wrap(func):
@@ -37,30 +38,53 @@ def async_wrap(func):
 
 
 class DatabaseVersion(Enum):
-    """Enum class for database version."""
+    """Enum class for database version.
 
-    MYSQL_8_0 = "mysql"
-    POSTGRES_13 = "postgresql"
-    POSTGRES_12 = "postgresql"
-    POSTGRES_11 = "postgresql"
-    POSTGRES_10 = "postgresql"
-    POSTGRES_9_6 = "postgresql"
+    All supported database versions for service."""
+
+    MYSQL_8_0 = "MYSQL_8_0"
+    POSTGRES_13 = "POSTGRES_13"
+    POSTGRES_12 = "POSTGRES_12"
+    POSTGRES_11 = "POSTGRES_11"
+    POSTGRES_10 = "POSTGRES_10"
+    POSTGRES_9_6 = "POSTGRES_9_6"
+
+    def is_mysql(self):
+        """Helper method to determine if database is MySQL dialect."""
+
+        if self.value.startswith("MYSQL"):
+            return True
+        return False
+
+    def is_postgres(self):
+        """Helper method to determine if database is PostgreSQL dialect."""
+        if self.value.startswith("POSTGRES"):
+            return True
+        return False
 
 
-class RoleService:
-    """Interface for managing a database and it's group roles."""
+class RoleService(ABC):
+    """Interface for managing a database and it's group roles.
 
+    This interface lays out the required methods for subclasses to implement.
+    Ex. MysqlRoleService subclass would implement the methods below for MySQL."""
+
+    @abstractmethod
     def __init__(self, db):
         pass
 
+    @abstractmethod
     def fetch_role_grants(self, group_name):
         pass
 
+    @abstractmethod
     def create_group_role(self, role):
         pass
 
+    @abstractmethod
     def grant_group_role(self, role, users):
         pass
 
+    @abstractmethod
     def revoke_group_role(self, role, users):
         pass
