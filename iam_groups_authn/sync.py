@@ -18,14 +18,168 @@ import asyncio
 from google.auth import iam
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
-from iam_groups_authn.mysql import mysql_username
+from google.cloud.sql.connector.instance_connection_manager import IPTypes
 import json
 from aiohttp import ClientSession
 from enum import Enum
 import logging
+from iam_groups_authn.sql_admin import (
+    get_instance_users,
+    add_missing_db_users,
+    InstanceConnectionName,
+)
+from iam_groups_authn.iam_admin import get_iam_users
+from iam_groups_authn.utils import DatabaseVersion
+from iam_groups_authn.mysql import (
+    init_mysql_connection_engine,
+    MysqlRoleService,
+    mysql_username,
+)
+from iam_groups_authn.postgres import (
+    init_postgres_connection_engine,
+    PostgresRoleService,
+)
 
 # URI for OAuth2 credentials
 TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
+
+# define OAuth 2 scopes
+SCOPES = [
+    "https://www.googleapis.com/auth/admin.directory.group.member.readonly",
+    "https://www.googleapis.com/auth/sqlservice.admin",
+]
+
+
+async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
+    # set ip_type to proper type for connector
+    ip_type = IPTypes.PRIVATE if private_ip else IPTypes.PUBLIC
+
+    # update default credentials with IAM and SQL admin scopes
+    updated_creds = get_credentials(credentials, SCOPES)
+
+    # create UserService object for API calls
+    user_service = UserService(updated_creds)
+
+    # keep track of IAM group and database instance tasks
+    group_tasks = {}
+    instance_tasks = {}
+
+    # loop iam_groups and sql_instances creating async tasks
+    for group in iam_groups:
+        group_task = asyncio.create_task(get_iam_users(user_service, group))
+        group_tasks[group] = group_task
+
+    for instance in sql_instances:
+        instance_task = asyncio.create_task(get_instance_users(user_service, instance))
+        database_version_task = asyncio.create_task(
+            user_service.get_database_version(
+                InstanceConnectionName(*instance.split(":"))
+            )
+        )
+        instance_tasks[instance] = (instance_task, database_version_task)
+
+    # create pairings of iam groups and instances
+    for group in iam_groups:
+        for instance in sql_instances:
+
+            # get database version of instance and check if supported
+            database_version = await instance_tasks[instance][1]
+            try:
+                database_version = DatabaseVersion(database_version)
+            except ValueError as e:
+                raise ValueError(
+                    f"Unsupported database version for instance `{instance}`. Current supported versions are: {list(DatabaseVersion.__members__.keys())}"
+                ) from e
+
+            # add missing IAM group members to database
+            add_users_task = asyncio.create_task(
+                add_missing_db_users(
+                    user_service,
+                    group_tasks[group],
+                    instance_tasks[instance][0],
+                    instance,
+                    database_version,
+                )
+            )
+
+            # initialize database connection pool
+            if database_version.is_mysql():
+                db = init_mysql_connection_engine(instance, updated_creds, ip_type)
+                role_service = MysqlRoleService(db)
+            else:
+                db = init_postgres_connection_engine(instance, updated_creds, ip_type)
+                role_service = PostgresRoleService(db)
+            logging.debug(
+                "[%s][%s] Initialized a %s connection pool."
+                % (instance, group, database_version.value)
+            )
+
+            # verify role for IAM group exists on database, create if does not exist
+            role = mysql_username(group)
+            verify_role_task = asyncio.create_task(role_service.create_group_role(role))
+
+            # get database users who have group role
+            users_with_roles_task = asyncio.create_task(
+                get_users_with_roles(role_service, role)
+            )
+
+            # await dependent tasks
+            results = await asyncio.gather(
+                add_users_task, verify_role_task, return_exceptions=True
+            )
+            # raise exception if found
+            for result in results:
+                if issubclass(type(result), Exception):
+                    raise result
+
+            # log IAM users added as database users
+            added_users = results[0]
+            logging.debug(
+                "[%s][%s] Users added to database: %s."
+                % (instance, group, list(added_users))
+            )
+
+            # revoke group role from users no longer in IAM group
+            revoke_role_task = asyncio.create_task(
+                revoke_iam_group_role(
+                    role_service,
+                    role,
+                    users_with_roles_task,
+                    group_tasks[group],
+                    database_version,
+                )
+            )
+
+            # grant group role to IAM users who are missing it on database
+            grant_role_task = asyncio.create_task(
+                grant_iam_group_role(
+                    role_service,
+                    role,
+                    users_with_roles_task,
+                    group_tasks[group],
+                    database_version,
+                )
+            )
+            results = await asyncio.gather(
+                revoke_role_task, grant_role_task, return_exceptions=True
+            )
+            # raise exception if found
+            for result in results:
+                if issubclass(type(result), Exception):
+                    raise result
+
+            # log sync info
+            revoked_users, granted_users = results
+            logging.info(
+                "[%s][%s] Sync successful: %s users were revoked group role, %s users were granted group role."
+                % (instance, group, len(revoked_users), len(granted_users))
+            )
+            logging.debug(
+                "[%s][%s] Users revoked role: %s." % (instance, group, revoked_users)
+            )
+            logging.debug(
+                "[%s][%s] Users granted role: %s." % (instance, group, granted_users)
+            )
 
 
 class UserService:
