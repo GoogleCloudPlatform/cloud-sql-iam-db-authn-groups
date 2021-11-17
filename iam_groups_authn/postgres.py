@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# mysql.py contains all database specific functions for connecting
-# and querying a MySQL database
+# postgres.py contains all database specific functions for connecting
+# and querying a postgreSQL database
 
 import sqlalchemy
 from google.cloud.sql.connector import connector
@@ -22,27 +22,11 @@ from iam_groups_authn.utils import RoleService, async_wrap
 from google.auth.transport.requests import Request
 
 
-def mysql_username(iam_email):
-    """Get MySQL DB username from user or group email.
-
-    Given an IAM user or IAM group's email, get their corresponding MySQL DB username which is a
-    truncated version of their email. (everything before the '@' sign)
-
-    Args:
-        iam_email: An IAM user or group email.
-
-    Returns:
-        username: The IAM user or group's MySQL DB username.
-    """
-    username = iam_email.split("@")[0]
-    return username
-
-
-class MysqlRoleService(RoleService):
-    """Class for managing a MySQL DB user's role grants."""
+class PostgresRoleService(RoleService):
+    """Class for managing a Postgres DB user's role grants."""
 
     def __init__(self, db):
-        """Initialize a MysqlRoleService object.
+        """Initialize a PostgresRoleService object.
 
         Args:
             db: Database connection object.
@@ -59,9 +43,9 @@ class MysqlRoleService(RoleService):
         Returns:
             results: List of results for given query.
         """
-        # mysql query to get users with group role
+        # postgres query to get users with group role
         stmt = sqlalchemy.text(
-            "SELECT FROM_USER, TO_USER FROM mysql.role_edges WHERE FROM_USER= :group_name"
+            "SELECT pg_roles.rolname, (SELECT pg_roles.rolname FROM pg_roles WHERE oid = pg_auth_members.member) FROM pg_roles, pg_auth_members WHERE pg_auth_members.roleid = (SELECT oid FROM pg_roles WHERE rolname= :group_name) and pg_roles.rolname= :group_name"
         )
         # create connection to db instance
         with self.db.connect() as db_connection:
@@ -79,9 +63,16 @@ class MysqlRoleService(RoleService):
         Args:
             role: Name of group role to be verified or created as new role.
         """
-        stmt = sqlalchemy.text("CREATE ROLE IF NOT EXISTS :role")
+        # check if group role exists, otherwise create it
+        check_stmt = sqlalchemy.text("SELECT 1 FROM pg_roles WHERE rolname= :role")
+        stmt = sqlalchemy.text(f'CREATE ROLE "{role}"')
+        # create connection to db instance
         with self.db.connect() as db_connection:
-            db_connection.execute(stmt, {"role": role})
+            # check if role already exists
+            role_check = db_connection.execute(check_stmt, {"role": role}).fetchone()
+            # if role does not exist, create it
+            if not role_check:
+                db_connection.execute(stmt)
 
     @async_wrap
     def grant_group_role(self, role, users):
@@ -93,11 +84,12 @@ class MysqlRoleService(RoleService):
             role: Name of DB role to grant to users.
             users: List of DB users' usernames.
         """
-        # create connection to db instance
         with self.db.connect() as db_connection:
-            stmt = sqlalchemy.text("GRANT :role TO :user")
-            for user in users:
-                db_connection.execute(stmt, {"role": role, "user": user})
+            # if there are users to grant group role to, grant role to users
+            if users:
+                users = '"' + '", "'.join(users) + '"'
+                stmt = sqlalchemy.text(f'GRANT "{role}" TO {users}')
+                db_connection.execute(stmt)
 
     @async_wrap
     def revoke_group_role(self, role, users):
@@ -111,15 +103,17 @@ class MysqlRoleService(RoleService):
         """
         # create connection to db instance
         with self.db.connect() as db_connection:
-            stmt = sqlalchemy.text("REVOKE :role FROM :user")
-            for user in users:
-                db_connection.execute(stmt, {"role": role, "user": user})
+            # if there are users to revoke group role from, revoke role from users
+            if users:
+                users = '"' + '", "'.join(users) + '"'
+                stmt = sqlalchemy.text(f'REVOKE "{role}" FROM {users}')
+                db_connection.execute(stmt)
 
 
-def init_mysql_connection_engine(
+def init_postgres_connection_engine(
     instance_connection_name, creds, ip_type=IPTypes.PUBLIC
 ):
-    """Configure and initialize MySQL database connection pool.
+    """Configure and initialize Postgres database connection pool.
 
     Configures the parameters for the database connection pool. Initiliazes the
     database connection pool using the Cloud SQL Python Connector.
@@ -145,19 +139,22 @@ def init_mysql_connection_engine(
         request = Request()
         creds.refresh(request)
 
-    # service account email to access DB, mysql truncates usernames to before '@' sign
-    service_account_email = mysql_username(creds.service_account_email)
+    # service account to access DB, postgres removes suffix
+    service_account_email = (creds.service_account_email).removesuffix(
+        ".gserviceaccount.com"
+    )
     # build connection for db using Python Connector
     connection = lambda: connector.connect(
         instance_connection_name,
-        "pymysql",
+        "pg8000",
         ip_types=ip_type,
         user=service_account_email,
-        password=str(creds.token),
-        db="",
+        db="postgres",
         enable_iam_auth=True,
     )
 
     # create connection pool
-    pool = sqlalchemy.create_engine("mysql+pymysql://", creator=connection, **db_config)
+    pool = sqlalchemy.create_engine(
+        "postgresql+pg8000://", creator=connection, **db_config
+    )
     return pool

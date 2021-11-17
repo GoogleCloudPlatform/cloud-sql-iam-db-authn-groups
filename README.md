@@ -4,7 +4,13 @@
 This project is a self-deployed service that provides support for managing [Cloud SQL IAM Database Authentication](https://cloud.google.com/sql/docs/mysql/authentication) for groups. This service leverages [Cloud Run](https://cloud.google.com/run), [Cloud Scheduler](https://cloud.google.com/scheduler), and the [Cloud SQL Python Connector](https://github.com/googlecloudplatform/cloud-sql-python-connector) to consistently update and sync Cloud SQL instances based on IAM groups. It will create missing database IAM users, GRANT roles to database IAM users based on their IAM groups, and REVOKE roles from database IAM users no longer in IAM groups.
 
 ## Supported Databases
-Currently only **MySQL 8.0** databases are supported.
+Currently only the following databases are supported:
+- **MySQL 8.0**
+- **PostgreSQL 13**
+- **PostgreSQL 12**
+- **PostgreSQL 11**
+- **PostgreSQL 10**
+- **PostgreSQL 9.6**
 
 ## Overview
 The Cloud SQL IAM Database Authentication for Groups service at an overview is made of Cloud Scheduler Job(s) and Cloud Run instance(s). 
@@ -141,7 +147,7 @@ To properly manage the database users on each Cloud SQL instance that is configu
 Add the service account as an IAM authenticated database user on each Cloud SQL instance that needs managing through IAM groups. Can be done both manually through the Google Cloud Console or through the following `gcloud` command.
 
 Replace the following values:
-- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account.
+- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account. (**NOTE**: For Postgres instances, remove the `.gserviceaccount.com` suffix from service account email.)
 - `INSTANCE_NAME`: The name of a Cloud SQL instance.
 ```
 gcloud sql users create <SERVICE_ACCOUNT_EMAIL> \
@@ -156,7 +162,8 @@ Connect to all Cloud SQL instances in question with an admin user or another dat
 
 Once connected, grant the service account IAM database user the following permissions:
 
-Replace the following values in the above commands:
+#### MySQL Instance
+Replace the following values in the below commands:
 - `SERVICE_ACCOUNT_ID`: The ID (name) for the service account (everything before the **@** portion of email)
 Allow the service account to read database users and their roles.
 ```
@@ -171,6 +178,15 @@ GRANT CREATE ROLE ON *.* TO '<SERVICE_ACCOUNT_ID>';
 Allow the service account to **GRANT/REVOKE** roles to users through being a **ROLE_ADMIN**.
 ```
 GRANT ROLE_ADMIN ON *.* TO '<SERVICE_ACCOUNT_ID>';
+```
+
+#### PostgreSQL Instance
+Postgres allows a role or user to easily be granted the appropriate permissions for **CREATE**, and **GRANT/REVOKE** that are needed for creating and managing the group roles for IAM groups with one single command.
+
+Replace the following values:
+- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account with the `.gserviceaccount.com` suffix removed.
+```
+ALTER ROLE "<SERVICE_ACCOUNT_EMAIL>" WITH CREATEROLE;
 ```
 
 ## Deploying to Cloud Run
@@ -189,7 +205,7 @@ gcloud builds submit \
 Deploy Cloud Run Service from container image:
 
 Replace the following values:
-- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account.
+- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account created above.
 - `PROJECT_ID`: The Google Cloud project ID.
 ```
 gcloud run deploy iam-db-authn-groups \
@@ -234,7 +250,7 @@ An example command creating a Cloud Scheduler job to run the IAM database authen
 Replace the following values:
 - `JOB_NAME`: The name for the Cloud Scheduler job.
 - `SERVICE_URL`: The service URL of the Cloud Run service.
-- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account.
+- `SERVICE_ACCOUNT_EMAIL`: The email address for the service account created above.
 - `PATH_TO_PAYLOAD`: Path to payload JSON file.
 ```
 gcloud scheduler jobs create http \
@@ -264,7 +280,7 @@ The name of the mapped IAM group database role is the email of the IAM group wit
 
 The service verifies that a group role exists or creates one on the database if it does not exist. It is recommended to configure the Cloud Scheduler job(s) and after having it triggered **at least** once, have a Database Administrator or project admin verify the creation of the group roles and **GRANT** the group roles the appropriate privileges on each Cloud SQL instance that should be inherited by database users of those IAM groups on all consecutive Cloud Scheduler runs. 
 
-To verify the creation of group roles after Cloud Scheduler has triggered at least once, the following command can be run:
+To verify the creation of group roles after Cloud Scheduler has triggered at least once, the following command can be run for **MySQL** instances (**PostgreSQL** instances require connecting to the database to verify):
 
 Replace the following values:
 - `INSTANCE_NAME`: The name of a Cloud SQL instance that was configured in the Cloud Scheduler JSON payload.
