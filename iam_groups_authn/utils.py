@@ -52,15 +52,12 @@ class DatabaseVersion(Enum):
     def is_mysql(self):
         """Helper method to determine if database is MySQL dialect."""
 
-        if self.value.startswith("MYSQL"):
-            return True
-        return False
+        return self.value.startswith("MYSQL")
 
     def is_postgres(self):
         """Helper method to determine if database is PostgreSQL dialect."""
-        if self.value.startswith("POSTGRES"):
-            return True
-        return False
+
+        return self.value.startswith("POSTGRES")
 
 
 class RoleService(ABC):
