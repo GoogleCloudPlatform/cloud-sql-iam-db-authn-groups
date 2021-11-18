@@ -6,11 +6,7 @@ This project is a self-deployed service that provides support for managing [Clou
 ## Supported Databases
 Currently only the following databases are supported:
 - **MySQL 8.0**
-- **PostgreSQL 13**
-- **PostgreSQL 12**
-- **PostgreSQL 11**
-- **PostgreSQL 10**
-- **PostgreSQL 9.6**
+- **PostgreSQL 13, 12, 11, 10, 9.6**
 
 ## Overview
 The Cloud SQL IAM Database Authentication for Groups service at an overview is made of Cloud Scheduler Job(s) and Cloud Run instance(s). 
