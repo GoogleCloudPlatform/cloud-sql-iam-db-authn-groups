@@ -42,7 +42,7 @@ def check_role_postgres(db, role):
     Args:
         db: Database connection pool to connect to.
         role: Given role to query users in database with.
-
+    
     Returns:
         users_with_role: List of users who have role granted to them.
     """
@@ -75,6 +75,17 @@ def setup_and_teardown():
 
 @pytest.mark.asyncio
 async def test_service_postgres(credentials):
+    """Test end-to-end usage of GroupSync service on PostgreSQL instance.
+
+    Test plan:
+        - Verifies test user is not a database user
+        - Run GroupSync
+        - Verifies test user is now a database user
+        - Verifies all IAM members of IAM group have been granted group role
+        - Remove test user from IAM group
+        - Run GroupSync
+        - Verifies test user no longer has group role
+    """
     # check that test_user is not a database user
     user_service = UserService(credentials)
     db_users = await get_instance_users(user_service, sql_instance)
