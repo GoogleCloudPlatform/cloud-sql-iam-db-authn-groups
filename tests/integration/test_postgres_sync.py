@@ -27,7 +27,7 @@ import time
 
 # load test params from environment
 sql_instance = os.environ["POSTGRES_INSTANCE"]
-iam_groups = os.environ["IAM_GROUPS"]
+iam_groups = [os.environ["IAM_GROUPS"]]
 test_user = os.environ["TEST_USER"]
 
 scopes = [
