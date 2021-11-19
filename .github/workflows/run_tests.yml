@@ -40,4 +40,4 @@ jobs:
       
       - name: Run pytest
         run: |
-          python3 -m pytest tests/
+          python3 -m pytest tests/unit

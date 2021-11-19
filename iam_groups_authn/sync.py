@@ -15,17 +15,168 @@
 # sync.py contains functions for syncing IAM groups with Cloud SQL instances
 
 import asyncio
-from google.auth import iam
 from google.auth.transport.requests import Request
-from google.oauth2 import service_account
-from iam_groups_authn.mysql import mysql_username
+from google.cloud.sql.connector.instance_connection_manager import IPTypes
 import json
 from aiohttp import ClientSession
 from enum import Enum
 import logging
+from iam_groups_authn.sql_admin import (
+    get_instance_users,
+    add_missing_db_users,
+    InstanceConnectionName,
+)
+from iam_groups_authn.iam_admin import get_iam_users
+from iam_groups_authn.utils import DatabaseVersion
+from iam_groups_authn.mysql import (
+    init_mysql_connection_engine,
+    MysqlRoleService,
+    mysql_username,
+)
+from iam_groups_authn.postgres import (
+    init_postgres_connection_engine,
+    PostgresRoleService,
+)
 
-# URI for OAuth2 credentials
-TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
+
+async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
+    """GroupSync method to sync IAM groups with Cloud SQL instances.
+
+    Args:
+        iam_groups: List of iam group emails for IAM groups to sync.
+            (e.g. ["iam-group@test.com", "iam-group2@test.com"])
+        sql_instances: List of instance connection names for Cloud SQL instances to sync.
+            (e.g. ["<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>"])
+        credentials: OAuth2 credentials.
+        private_ip:(optional) Boolean flag for connecting to Cloud SQL databases with
+            Private or Public IPs. (defaults to False for Public IP)
+    """
+    # set ip_type to proper type for connector
+    ip_type = IPTypes.PRIVATE if private_ip else IPTypes.PUBLIC
+
+    # create UserService object for API calls
+    user_service = UserService(credentials)
+
+    # keep track of IAM group and database instance tasks
+    group_tasks = {}
+    instance_tasks = {}
+
+    # loop iam_groups and sql_instances creating async tasks
+    for group in iam_groups:
+        group_task = asyncio.create_task(get_iam_users(user_service, group))
+        group_tasks[group] = group_task
+
+    for instance in sql_instances:
+        instance_task = asyncio.create_task(get_instance_users(user_service, instance))
+        database_version_task = asyncio.create_task(
+            user_service.get_database_version(
+                InstanceConnectionName(*instance.split(":"))
+            )
+        )
+        instance_tasks[instance] = (instance_task, database_version_task)
+
+    # create pairings of iam groups and instances
+    for group in iam_groups:
+        for instance in sql_instances:
+
+            # get database version of instance and check if supported
+            database_version = await instance_tasks[instance][1]
+            try:
+                database_version = DatabaseVersion(database_version)
+            except ValueError as e:
+                raise ValueError(
+                    f"Unsupported database version for instance `{instance}`. Current supported versions are: {list(DatabaseVersion.__members__.keys())}"
+                ) from e
+
+            # add missing IAM group members to database
+            add_users_task = asyncio.create_task(
+                add_missing_db_users(
+                    user_service,
+                    group_tasks[group],
+                    instance_tasks[instance][0],
+                    instance,
+                    database_version,
+                )
+            )
+
+            # initialize database connection pool
+            if database_version.is_mysql():
+                db = init_mysql_connection_engine(instance, credentials, ip_type)
+                role_service = MysqlRoleService(db)
+            else:
+                db = init_postgres_connection_engine(instance, credentials, ip_type)
+                role_service = PostgresRoleService(db)
+            logging.debug(
+                "[%s][%s] Initialized a %s connection pool."
+                % (instance, group, database_version.value)
+            )
+
+            # verify role for IAM group exists on database, create if does not exist
+            role = mysql_username(group)
+            verify_role_task = asyncio.create_task(role_service.create_group_role(role))
+
+            # get database users who have group role
+            users_with_roles_task = asyncio.create_task(
+                get_users_with_roles(role_service, role)
+            )
+
+            # await dependent tasks
+            results = await asyncio.gather(
+                add_users_task, verify_role_task, return_exceptions=True
+            )
+            # raise exception if found
+            for result in results:
+                if issubclass(type(result), Exception):
+                    raise result
+
+            # log IAM users added as database users
+            added_users = results[0]
+            logging.debug(
+                "[%s][%s] Users added to database: %s."
+                % (instance, group, list(added_users))
+            )
+
+            # revoke group role from users no longer in IAM group
+            revoke_role_task = asyncio.create_task(
+                revoke_iam_group_role(
+                    role_service,
+                    role,
+                    users_with_roles_task,
+                    group_tasks[group],
+                    database_version,
+                )
+            )
+
+            # grant group role to IAM users who are missing it on database
+            grant_role_task = asyncio.create_task(
+                grant_iam_group_role(
+                    role_service,
+                    role,
+                    users_with_roles_task,
+                    group_tasks[group],
+                    database_version,
+                )
+            )
+            results = await asyncio.gather(
+                revoke_role_task, grant_role_task, return_exceptions=True
+            )
+            # raise exception if found
+            for result in results:
+                if issubclass(type(result), Exception):
+                    raise result
+
+            # log sync info
+            revoked_users, granted_users = results
+            logging.info(
+                "[%s][%s] Sync successful: %s users were revoked group role, %s users were granted group role."
+                % (instance, group, len(revoked_users), len(granted_users))
+            )
+            logging.debug(
+                "[%s][%s] Users revoked role: %s." % (instance, group, revoked_users)
+            )
+            logging.debug(
+                "[%s][%s] Users granted role: %s." % (instance, group, granted_users)
+            )
 
 
 class UserService:
@@ -233,46 +384,6 @@ async def get_users_with_roles(role_service, role):
         # add users who have role
         role_grants.append(grant[1])
     return role_grants
-
-
-def get_credentials(creds, scopes):
-    """Update default credentials.
-
-    Based on scopes, update OAuth2 default credentials
-    accordingly.
-
-    Args:
-        creds: Default OAuth2 credentials.
-        scopes: List of scopes for the credentials to limit access.
-
-    Returns:
-        updated_credentials: Updated OAuth2 credentials with scopes applied.
-    """
-    try:
-        # First try to update credentials using service account key file
-        updated_credentials = creds.with_scopes(scopes)
-        # if not valid refresh credentials
-        if not updated_credentials.valid:
-            request = Request()
-            updated_credentials.refresh(request)
-    except AttributeError:
-        # Exception is raised if we are using default credentials (e.g. Cloud Run)
-        request = Request()
-        creds.refresh(request)
-        service_acccount_email = creds.service_account_email
-        signer = iam.Signer(request, creds, service_acccount_email)
-        updated_credentials = service_account.Credentials(
-            signer, service_acccount_email, TOKEN_URI, scopes=scopes
-        )
-        # if not valid, refresh credentials
-        if not updated_credentials.valid:
-            updated_credentials.refresh(request)
-    except Exception as e:
-        raise Exception(
-            "Error: Failed to get proper credentials for service. Verify service account used to run service."
-        ) from e
-
-    return updated_credentials
 
 
 async def revoke_iam_group_role(
