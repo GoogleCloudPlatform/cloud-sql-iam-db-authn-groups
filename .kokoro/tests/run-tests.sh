@@ -18,15 +18,19 @@ set -e
 
 # Kokoro setup
 if [ -n "$KOKORO_GFILE_DIR" ]; then
+  # source secrets
+  source "${KOKORO_GFILE_DIR}/secret_manager/groupsync-env-vars"
+  export GOOGLE_APPLICATION_CREDENTIALS="${KOKORO_GFILE_DIR}/secret_manager/groupsync-key"
+
   # Move into project directory
   cd github/cloud-sql-iam-db-authn-groups
-  # source secrets
-  source "${KOKORO_GFILE_DIR}/TEST_SECRETS.sh"
-  export GOOGLE_APPLICATION_CREDENTIALS="${KOKORO_GFILE_DIR}/testing-service-account.json"
 fi
 
 # add user's pip binary path to PATH
 export PATH="${HOME}/.local/bin:${PATH}"
+
+# pip install test requirements
+python3 -m pip install -r requirements-test.txt
 
 echo -e "******************** Running tests... ********************\n"
 python3 -m pytest tests/integration
