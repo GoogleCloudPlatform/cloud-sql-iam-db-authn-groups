@@ -15,9 +15,7 @@
 # sync.py contains functions for syncing IAM groups with Cloud SQL instances
 
 import asyncio
-from google.auth import iam
 from google.auth.transport.requests import Request
-from google.oauth2 import service_account
 from google.cloud.sql.connector.instance_connection_manager import IPTypes
 import json
 from aiohttp import ClientSession
@@ -40,15 +38,6 @@ from iam_groups_authn.postgres import (
     PostgresRoleService,
 )
 
-# URI for OAuth2 credentials
-TOKEN_URI = "https://accounts.google.com/o/oauth2/token"
-
-# define OAuth 2 scopes
-SCOPES = [
-    "https://www.googleapis.com/auth/admin.directory.group.member.readonly",
-    "https://www.googleapis.com/auth/sqlservice.admin",
-]
-
 
 async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
     """GroupSync method to sync IAM groups with Cloud SQL instances.
@@ -65,11 +54,8 @@ async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
     # set ip_type to proper type for connector
     ip_type = IPTypes.PRIVATE if private_ip else IPTypes.PUBLIC
 
-    # update default credentials with IAM and SQL admin scopes
-    updated_creds = get_credentials(credentials, SCOPES)
-
     # create UserService object for API calls
-    user_service = UserService(updated_creds)
+    user_service = UserService(credentials)
 
     # keep track of IAM group and database instance tasks
     group_tasks = {}
@@ -115,10 +101,10 @@ async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
 
             # initialize database connection pool
             if database_version.is_mysql():
-                db = init_mysql_connection_engine(instance, updated_creds, ip_type)
+                db = init_mysql_connection_engine(instance, credentials, ip_type)
                 role_service = MysqlRoleService(db)
             else:
-                db = init_postgres_connection_engine(instance, updated_creds, ip_type)
+                db = init_postgres_connection_engine(instance, credentials, ip_type)
                 role_service = PostgresRoleService(db)
             logging.debug(
                 "[%s][%s] Initialized a %s connection pool."
@@ -398,46 +384,6 @@ async def get_users_with_roles(role_service, role):
         # add users who have role
         role_grants.append(grant[1])
     return role_grants
-
-
-def get_credentials(creds, scopes):
-    """Update default credentials.
-
-    Based on scopes, update OAuth2 default credentials
-    accordingly.
-
-    Args:
-        creds: Default OAuth2 credentials.
-        scopes: List of scopes for the credentials to limit access.
-
-    Returns:
-        updated_credentials: Updated OAuth2 credentials with scopes applied.
-    """
-    try:
-        # First try to update credentials using service account key file
-        updated_credentials = creds.with_scopes(scopes)
-        # if not valid refresh credentials
-        if not updated_credentials.valid:
-            request = Request()
-            updated_credentials.refresh(request)
-    except AttributeError:
-        # Exception is raised if we are using default credentials (e.g. Cloud Run)
-        request = Request()
-        creds.refresh(request)
-        service_acccount_email = creds.service_account_email
-        signer = iam.Signer(request, creds, service_acccount_email)
-        updated_credentials = service_account.Credentials(
-            signer, service_acccount_email, TOKEN_URI, scopes=scopes
-        )
-        # if not valid, refresh credentials
-        if not updated_credentials.valid:
-            updated_credentials.refresh(request)
-    except Exception as e:
-        raise Exception(
-            "Error: Failed to get proper credentials for service. Verify service account used to run service."
-        ) from e
-
-    return updated_credentials
 
 
 async def revoke_iam_group_role(

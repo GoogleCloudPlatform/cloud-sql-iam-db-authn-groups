@@ -12,11 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from quart import Quart, request
+from quart import Quart
+import quart
 from google.auth import default
+from google.auth.transport.requests import Request
 import logging
 import google.cloud.logging
 from iam_groups_authn.sync import groups_sync
+
+# define OAuth 2 scopes
+SCOPES = [
+    "https://www.googleapis.com/auth/admin.directory.group.member.readonly",
+    "https://www.googleapis.com/auth/sqlservice.admin",
+]
 
 app = Quart(__name__)
 
@@ -30,6 +38,9 @@ log_levels = {
     "ERROR": logging.ERROR,
 }
 
+# grab default creds from cloud run service account
+creds, project = default(scopes=SCOPES)
+
 
 @app.route("/", methods=["GET"])
 def health_check():
@@ -38,7 +49,7 @@ def health_check():
 
 @app.route("/run", methods=["PUT"])
 async def run_groups_authn():
-    body = await request.get_json(force=True)
+    body = await quart.request.get_json(force=True)
     # try reading in required request parameters and verify type, otherwise throw custom error
     sql_instances = body.get("sql_instances")
     if sql_instances is None or type(sql_instances) is not list:
@@ -67,8 +78,10 @@ async def run_groups_authn():
     if type(log_level) is str and log_level.upper() in log_levels:
         logging.getLogger().setLevel(log_levels[log_level.upper()])
 
-    # grab default creds from cloud run service account
-    creds, project = default()
+    # check if credentials are expired
+    if not creds.valid:
+        request = Request()
+        creds.refresh(request)
 
     # sync IAM groups to Cloud SQL instances
     await groups_sync(iam_groups, sql_instances, creds, private_ip)

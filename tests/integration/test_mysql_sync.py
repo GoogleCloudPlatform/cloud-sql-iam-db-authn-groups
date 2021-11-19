@@ -15,6 +15,7 @@
 import pytest
 import os
 from google.auth import default
+from google.auth.transport.requests import Request
 import sqlalchemy
 from helpers import delete_database_user, delete_iam_member, add_iam_member
 from iam_groups_authn.iam_admin import get_iam_users
@@ -60,6 +61,11 @@ def setup_and_teardown():
 
     # load in service account credentials for test
     credentials, project = default(scopes=scopes)
+
+    # check if credentials are expired
+    if not credentials.valid:
+        request = Request()
+        credentials.refresh(request)
 
     yield credentials
 
