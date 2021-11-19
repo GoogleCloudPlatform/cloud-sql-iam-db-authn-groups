@@ -14,7 +14,7 @@
 
 import pytest
 import os
-from google.oauth2 import service_account
+from google.auth import default
 import sqlalchemy
 from helpers import delete_database_user, delete_iam_member, add_iam_member
 from iam_groups_authn.iam_admin import get_iam_users
@@ -26,7 +26,6 @@ import time
 # load test params from environment
 sql_instance = os.environ["MYSQL_INSTANCE"]
 iam_groups = os.environ["IAM_GROUPS"]
-key_path = os.environ["KEY_PATH"]
 test_user = os.environ["TEST_USER"]
 
 scopes = [
@@ -60,9 +59,7 @@ def setup_and_teardown():
     """Function for setting up and tearing down test."""
 
     # load in service account credentials for test
-    credentials = service_account.Credentials.from_service_account_file(
-        filename=key_path, scopes=scopes
-    )
+    credentials, project = default(scopes=scopes)
 
     yield credentials
 
