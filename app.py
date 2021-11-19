@@ -20,7 +20,7 @@ import logging
 import google.cloud.logging
 from iam_groups_authn.sync import groups_sync
 
-# define OAuth 2 scopes
+# define OAuth2 scopes
 SCOPES = [
     "https://www.googleapis.com/auth/admin.directory.group.member.readonly",
     "https://www.googleapis.com/auth/sqlservice.admin",
