@@ -1,0 +1,132 @@
+# Copyright 2021 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import pytest
+import os
+from google.oauth2 import service_account
+import sqlalchemy
+from helpers import delete_database_user, delete_iam_member, add_iam_member
+from iam_groups_authn.iam_admin import get_iam_users
+from iam_groups_authn.mysql import init_mysql_connection_engine, mysql_username
+from iam_groups_authn.sql_admin import get_instance_users
+from iam_groups_authn.sync import groups_sync, UserService
+import time
+
+# load test params from environment
+sql_instance = os.environ["MYSQL_INSTANCE"]
+iam_groups = os.environ["IAM_GROUPS"]
+key_path = os.environ["KEY_PATH"]
+test_user = os.environ["TEST_USER"]
+
+scopes = [
+    "https://www.googleapis.com/auth/admin.directory.group.member",
+    "https://www.googleapis.com/auth/sqlservice.admin",
+]
+
+
+def check_role_mysql(db, role):
+    """Function to get database users who have given MySQL role.
+
+    Args:
+        db: Database connection pool to connect to.
+        role: Given role to query users in database with.
+
+    Returns:
+        users_with_role: List of users who have role granted to them.
+    """
+
+    stmt = sqlalchemy.text(
+        "SELECT TO_USER FROM mysql.role_edges WHERE FROM_USER= :role"
+    )
+    with db.connect() as conn:
+        results = conn.execute(stmt, {"role": role}).fetchall()
+    users_with_role = [result[0] for result in results]
+    return users_with_role
+
+
+@pytest.fixture(name="credentials", autouse=True)
+def setup_and_teardown():
+    """Function for setting up and tearing down test."""
+
+    # load in service account credentials for test
+    credentials = service_account.Credentials.from_service_account_file(
+        filename=key_path, scopes=scopes
+    )
+
+    yield credentials
+
+    # cleanup user from database
+    delete_database_user(sql_instance, mysql_username(test_user), credentials)
+    # re-add member to IAM group
+    add_iam_member(iam_groups[0], test_user, credentials)
+
+
+@pytest.mark.asyncio
+async def test_service_mysql(credentials):
+    """Test end-to-end usage of GroupSync service on MySQL instance.
+
+    Test plan:
+        - Verifies test user is not a database user
+        - Run GroupSync
+        - Verifies test user is now a database user
+        - Verifies all IAM members of IAM group have been granted group role
+        - Remove test user from IAM group
+        - Run GroupSync
+        - Verifies test user no longer has group role
+    """
+
+    # check that test_user is not a database user
+    user_service = UserService(credentials)
+    db_users = await get_instance_users(user_service, sql_instance)
+    assert mysql_username(test_user) not in db_users
+
+    # make sure test_user is member of IAM group
+    try:
+        add_iam_member(iam_groups[0], test_user, credentials)
+    except Exception:
+        print("Member must already belong to IAM Group.")
+
+    # run groups sync
+    await groups_sync(iam_groups, [sql_instance], credentials, False)
+
+    # check that test_user has been created as database user
+    db_users = await get_instance_users(user_service, sql_instance)
+    assert mysql_username(test_user) in db_users
+
+    # create database connection to instance
+    pool = init_mysql_connection_engine(sql_instance, credentials)
+
+    # check that each iam group member has group role
+    for iam_group in iam_groups:
+        users_with_role = check_role_mysql(pool, mysql_username(iam_group))
+        iam_members = await get_iam_users(user_service, iam_group)
+        for member in iam_members:
+            assert mysql_username(member) in users_with_role
+
+    # remove test_user from IAM group
+    delete_iam_member(iam_groups[0], test_user, credentials)
+
+    # wait 5 seconds, deleting IAM member is slow
+    time.sleep(5)
+
+    # run groups sync
+    await groups_sync(iam_groups, [sql_instance], credentials, False)
+
+    # verify test_user no longer has group role
+    users_with_role = check_role_mysql(pool, mysql_username(iam_groups[0]))
+    assert mysql_username(test_user) not in users_with_role
+
+    # close user_service session
+    if not user_service.client_session.closed:
+        await user_service.client_session.close()

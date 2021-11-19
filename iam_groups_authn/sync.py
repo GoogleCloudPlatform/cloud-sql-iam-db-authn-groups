@@ -51,6 +51,17 @@ SCOPES = [
 
 
 async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
+    """GroupSync method to sync IAM groups with Cloud SQL instances.
+
+    Args:
+        iam_groups: List of iam group emails for IAM groups to sync.
+            (e.g. ["iam-group@test.com", "iam-group2@test.com"])
+        sql_instances: List of instance connection names for Cloud SQL instances to sync.
+            (e.g. ["<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>"])
+        credentials: OAuth2 credentials.
+        private_ip:(optional) Boolean flag for connecting to Cloud SQL databases with
+            Private or Public IPs. (defaults to False for Public IP)
+    """
     # set ip_type to proper type for connector
     ip_type = IPTypes.PRIVATE if private_ip else IPTypes.PUBLIC
 
