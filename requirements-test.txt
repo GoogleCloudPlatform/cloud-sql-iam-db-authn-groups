@@ -4,6 +4,7 @@ quart==0.15.1
 SQLAlchemy==1.4.22
 google-auth==2.0.0
 PyMySQL==1.0.2
+pg8000==1.22.0
 google-api-python-client==2.19.1
 cloud-sql-python-connector==0.4.1
 google-cloud-logging==2.6.0
