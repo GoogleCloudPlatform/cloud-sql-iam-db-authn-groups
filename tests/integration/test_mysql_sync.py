@@ -134,6 +134,6 @@ async def test_service_mysql(credentials):
     users_with_role = check_role_mysql(pool, mysql_username(iam_groups[0]))
     assert mysql_username(test_user) not in users_with_role
 
-    # close client session session
+    # close aiohttp client session for graceful exit
     if not client_session.closed:
         await client_session.close()
