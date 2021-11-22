@@ -71,10 +71,13 @@ def setup_and_teardown():
 
     yield credentials
 
-    # cleanup user from database
-    delete_database_user(sql_instance, test_user, credentials)
-    # re-add member to IAM group
-    add_iam_member(iam_groups[0], test_user, credentials)
+    try:
+        # cleanup user from database
+        delete_database_user(sql_instance, test_user, credentials)
+        # re-add member to IAM group
+        add_iam_member(iam_groups[0], test_user, credentials)
+    except Exception:
+        print("------------------------Cleanup Failed!------------------------")
 
 
 @pytest.mark.asyncio
@@ -91,6 +94,12 @@ async def test_service_postgres(credentials):
         - Verifies test user no longer has group role
     """
 
+    # remove database user if they exist
+    try:
+        delete_database_user(sql_instance, test_user, credentials)
+    except Exception:
+        print("Database user must already have been deleted!")
+
     # create aiohttp client session for async API calls
     client_session = ClientSession(headers={"Content-Type": "application/json"})
 
@@ -102,6 +111,8 @@ async def test_service_postgres(credentials):
     # make sure test_user is member of IAM group
     try:
         add_iam_member(iam_groups[0], test_user, credentials)
+        # wait 5 seconds, adding IAM member is slow
+        time.sleep(5)
     except Exception:
         print("Member must already belong to IAM Group.")
 
