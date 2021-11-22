@@ -17,6 +17,7 @@ import os
 from google.auth import default
 from google.auth.transport.requests import Request
 import sqlalchemy
+from aiohttp import ClientSession
 from helpers import delete_database_user, delete_iam_member, add_iam_member
 from iam_groups_authn.iam_admin import get_iam_users
 from iam_groups_authn.mysql import init_mysql_connection_engine, mysql_username
@@ -69,10 +70,13 @@ def setup_and_teardown():
 
     yield credentials
 
-    # cleanup user from database
-    delete_database_user(sql_instance, mysql_username(test_user), credentials)
-    # re-add member to IAM group
-    add_iam_member(iam_groups[0], test_user, credentials)
+    try:
+        # cleanup user from database
+        delete_database_user(sql_instance, mysql_username(test_user), credentials)
+        # re-add member to IAM group
+        add_iam_member(iam_groups[0], test_user, credentials)
+    except Exception:
+        print("------------------------Cleanup Failed!------------------------")
 
 
 @pytest.mark.asyncio
@@ -89,14 +93,25 @@ async def test_service_mysql(credentials):
         - Verifies test user no longer has group role
     """
 
+    # remove database user if they exist
+    try:
+        delete_database_user(sql_instance, mysql_username(test_user), credentials)
+    except Exception:
+        print("Database user must already have been deleted!")
+
+    # create aiohttp client session for async API calls
+    client_session = ClientSession(headers={"Content-Type": "application/json"})
+
     # check that test_user is not a database user
-    user_service = UserService(credentials)
+    user_service = UserService(client_session, credentials)
     db_users = await get_instance_users(user_service, sql_instance)
     assert mysql_username(test_user) not in db_users
 
     # make sure test_user is member of IAM group
     try:
         add_iam_member(iam_groups[0], test_user, credentials)
+        # wait 5 seconds, adding IAM member is slow
+        time.sleep(5)
     except Exception:
         print("Member must already belong to IAM Group.")
 
@@ -130,6 +145,6 @@ async def test_service_mysql(credentials):
     users_with_role = check_role_mysql(pool, mysql_username(iam_groups[0]))
     assert mysql_username(test_user) not in users_with_role
 
-    # close user_service session
-    if not user_service.client_session.closed:
-        await user_service.client_session.close()
+    # close aiohttp client session for graceful exit
+    if not client_session.closed:
+        await client_session.close()
