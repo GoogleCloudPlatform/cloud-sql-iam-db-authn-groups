@@ -17,6 +17,7 @@ import os
 from google.auth import default
 from google.auth.transport.requests import Request
 import sqlalchemy
+from aiohttp import ClientSession
 from helpers import delete_database_user, delete_iam_member, add_iam_member
 from iam_groups_authn.iam_admin import get_iam_users
 from iam_groups_authn.mysql import mysql_username
@@ -89,8 +90,12 @@ async def test_service_postgres(credentials):
         - Run GroupSync
         - Verifies test user no longer has group role
     """
+
+    # create aiohttp client session for async API calls
+    client_session = ClientSession(headers={"Content-Type": "application/json"})
+
     # check that test_user is not a database user
-    user_service = UserService(credentials)
+    user_service = UserService(client_session, credentials)
     db_users = await get_instance_users(user_service, sql_instance)
     assert test_user not in db_users
 
@@ -130,6 +135,6 @@ async def test_service_postgres(credentials):
     users_with_role = check_role_postgres(pool, mysql_username(iam_groups[0]))
     assert test_user not in users_with_role
 
-    # close user_service session
-    if not user_service.client_session.closed:
-        await user_service.client_session.close()
+    # close aiohttp client session for graceful exit
+    if client_session.closed:
+        await client_session.close()

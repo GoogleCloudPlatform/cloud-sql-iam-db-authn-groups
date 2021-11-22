@@ -54,8 +54,11 @@ async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
     # set ip_type to proper type for connector
     ip_type = IPTypes.PRIVATE if private_ip else IPTypes.PUBLIC
 
+    # create aiohttp client session for async API calls
+    client_session = ClientSession(headers={"Content-Type": "application/json"})
+
     # create UserService object for API calls
-    user_service = UserService(credentials)
+    user_service = UserService(client_session, credentials)
 
     # keep track of IAM group and database instance tasks
     group_tasks = {}
@@ -178,20 +181,23 @@ async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
                 "[%s][%s] Users granted role: %s." % (instance, group, granted_users)
             )
 
+    # close aiohttp client session for graceful exit
+    if not client_session.closed:
+        await client_session.close()
+
 
 class UserService:
     """Helper class for building googleapis service calls."""
 
-    def __init__(self, creds):
+    def __init__(self, client_session, creds):
         """Initialize UserService instance.
 
         Args:
+            client_session: aiohttp client session object for API calls.
             creds: OAuth2 credentials to call admin APIs.
         """
+        self.client_session = client_session
         self.creds = creds
-        self.client_session = ClientSession(
-            headers={"Content-Type": "application/json"}
-        )
 
     async def get_group_members(self, group):
         """Get all members of an IAM group.
@@ -315,17 +321,6 @@ class UserService:
             raise Exception(
                 f"Error: Failed to get the database version for `{instance_connection_name}`. Verify instance connection name and instance details."
             ) from e
-
-    def __del__(self):
-        """Deconstructor for UserService to close ClientSession and have
-        graceful exit.
-        """
-
-        async def deconstruct():
-            if not self.client_session.closed:
-                await self.client_session.close()
-
-        asyncio.run_coroutine_threadsafe(deconstruct(), loop=asyncio.get_event_loop())
 
 
 class RequestType(Enum):
