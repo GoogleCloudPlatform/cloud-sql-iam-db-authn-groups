@@ -15,6 +15,7 @@
 # sync.py contains functions for syncing IAM groups with Cloud SQL instances
 
 import asyncio
+import itertools
 from google.auth.transport.requests import Request
 from google.cloud.sql.connector.instance_connection_manager import IPTypes
 import json
@@ -79,6 +80,7 @@ async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
         instance_tasks[instance] = (instance_task, database_version_task)
 
     # sync pairings of IAM groups and Cloud SQL instances
+    pairings = []
     for group in iam_groups:
         group_to_instance_futures = [
             asyncio.create_task(
@@ -94,8 +96,11 @@ async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
             )
             for instance in sql_instances
         ]
+        pairings.append(group_to_instance_futures)
 
-        await asyncio.gather(*group_to_instance_futures)
+    # merge list of futures and gather them
+    pairings = list(itertools.chain(*pairings))
+    await asyncio.gather(*group_to_instance_futures)
 
     # close aiohttp client session for graceful exit
     if not client_session.closed:
