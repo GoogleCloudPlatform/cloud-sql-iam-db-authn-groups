@@ -100,7 +100,7 @@ async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
 
     # merge list of futures and gather them
     pairings = list(itertools.chain(*pairings))
-    await asyncio.gather(*group_to_instance_futures)
+    await asyncio.gather(*pairings)
 
     # close aiohttp client session for graceful exit
     if not client_session.closed:
