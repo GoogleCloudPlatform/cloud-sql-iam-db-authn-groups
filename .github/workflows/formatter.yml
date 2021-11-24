@@ -24,6 +24,7 @@ on:
 
 jobs:
   suggest:
+    name: Suggest Changes
     runs-on: ubuntu-latest
 
     steps:

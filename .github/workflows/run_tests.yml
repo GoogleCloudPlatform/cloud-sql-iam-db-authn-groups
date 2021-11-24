@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: Run Tests
+name: Unit Tests
 
 # Run action on PRs to main
 on:
@@ -21,7 +21,7 @@ on:
 
 jobs:
   build:
-    name: Run Python Tests
+    name: Run Pytests
     runs-on: ubuntu-latest
 
     steps:
