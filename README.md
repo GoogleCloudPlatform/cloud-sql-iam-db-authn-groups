@@ -17,7 +17,7 @@ The Cloud Scheduler Job(s) are configured to run on the interval of your choosin
 
 The Cloud Run service calls the required Google APIs to get a snapshot of the current IAM group(s) members and the current Cloud SQL instance(s) database users, it then adds any new IAM members who have been added to the IAM group since the last sync as an IAM database user on the corresponding Cloud SQL instances. The Cloud Run service then also verifies or creates a database role within each configured database for each configured IAM group. Mapping each IAM group to a database role, the service can then GRANT/REVOKE this group role with the appropriate database permissions for the IAM group to all the proper IAM database users who are missing it or should not have it based on the members of the IAM group.
 
-<p align="center"><img src="images/service_overview.png" width="640"></p>
+<p align="center"><img src="images/service_overview.png" width="700"></p>
 
 ## Deployment
 There are a few initial setups steps to get the service ready and grant it the permissions needed in order to successfully operate. However, after this setup is complete, minimal configuration is needed in the future.
@@ -296,6 +296,8 @@ Private IP Cloud SQL instance(s) should be connected to a [VPC Network](https://
 
 Thie VPC Connector can be attached to the Cloud Run service previously created to allow Private IP connections to the Cloud SQL instances on the **same VPC Network**.
 
+<p align="center"><img src="images/private_ip_architecture.png" width="640"></p>
+
 Update the Cloud Run service with a VPC Connector.
 
 Replace the following values:
@@ -311,11 +313,11 @@ Multiple different Cloud Scheduler and Cloud Run configurations can be configure
 
 A Cloud Scheduler job maps which IAM group(s) and hence which IAM users to manage permissions for any given Cloud SQL instance(s). When configuring a Cloud Scheduler job, all IAM groups listed in the JSON body will be mapped to all Cloud SQL instances in the JSON body. Therefore, for custom configurations where certain IAM groups need to be mapped to one instance, and other IAM groups to a different Cloud SQL instance, the solution is to deploy multiple Cloud Scheduler jobs.
 
-<p align="center"><img src="images/custom_architecture.png" width="640"></p>
+<p align="center"><img src="images/custom_config.png" width="700"></p>
 
 A single Cloud Run service can be used for multiple Cloud Scheduler jobs across an organization's different Google Cloud projects as long as they allow Public IP connections.
 
 ### Private IP Configurations
 **NOTE:** For custom configurations with Private IP connections, multiple Cloud Run services may be required. Since Private IP configurations require the Cloud Run service and Cloud SQL instances to be connected to the same VPC network, thus for different projects with different VPC networks, a different Cloud Run service will be needed for each.
 
-<p align="center"><img src="images/private_ip_architecture.png" width="640"></p>
+<p align="center"><img src="images/private_custom_config.png" width="640"></p>
