@@ -97,11 +97,11 @@ To assign the Group Administator Role to the service account follow these four q
 ### Granting Database Permissions to the Service Account's Database User
 For GroupSync to run smoothly it needs an IAM service account database user with
 permissions on all Cloud SQL instances defined within the JSON file.
-This allows for the GroupSync service to read usernames of other database users
+This allows for the GroupSync service to read the names of database users
 and GRANT/REVOKE group role(s) appropriately.
 
-Connect to all Cloud SQL instances in question with an admin user or another
-database user with appropriate permissions for the following commands.
+Connect to all Cloud SQL instances defined within the JSON file
+as an admin user or another database user with appropriate permissions for the following commands.
 ([Connecting to an Instance](https://cloud.google.com/sql/docs/mysql/connect-overview))
 
 Once connected, grant the service account IAM database user that was created by the
