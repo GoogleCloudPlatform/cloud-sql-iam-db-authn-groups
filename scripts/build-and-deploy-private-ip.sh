@@ -15,6 +15,7 @@
 # limitations under the License.
 
 # variables required for below commands to properly build and deploy GroupSync
+echo "Setting environment variables..."
 ######################## DEPLOYMENT variables ########################
 export PROJECT_ID="" # project ID of project in which you want to deploy the service within
 export REGION="" # Google Cloud region to deploy GroupSync in
@@ -46,23 +47,30 @@ do
   fi
 done
 
+echo "Successfully set environment variables..."
+
 ######################## GCP PROJECT CONFIGURATION ########################
+echo "Configuring GCP project and region..."
 # set project
 gcloud config set project "$PROJECT_ID"
 
 # set region
 gcloud config set compute/region "$REGION"
 
+echo "Enabling required APIs..."
 # enable required APIs within project
 gcloud services enable run.googleapis.com cloudscheduler.googleapis.com \
     cloudbuild.googleapis.com sqladmin.googleapis.com admin.googleapis.com \
     iamcredentials.googleapis.com vpcaccess.googleapis.com servicenetworking.googleapis.com
 
 ######################## SERVICE ACCOUNT CONFIGURATION ########################
+echo "Creating Service Account $SERVICE_ACCOUNT_EMAIL..."
 # create service account for use with GroupSync (REMOVE STEP IF USING PRE-EXISTING SERVICE ACCOUNT)
 gcloud iam service-accounts create "$SERVICE_ACCOUNT_NAME" \
   --description="IAM Groups Authn Service Account" \
   --display-name="IAM Database Groups Authentication"
+
+echo "Adding IAM Policies to service account: $SERVICE_ACCOUNT_EMAIL"
 
 # add Cloud Run Invoke Role to service account
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
@@ -81,6 +89,7 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --role="projects/$PROJECT_ID/roles/IamAuthnGroups"
 
 ######################## IAM and DB ROLE CONFIGURATION ########################
+echo "Adding Cloud SQL Instance User role to IAM Groups..."
 # grant Cloud SQL Instance User role to all IAM group emails (so users of Group can inherit)
 for GROUP in $IAM_GROUPS;
 do
@@ -89,6 +98,7 @@ do
     --role="roles/cloudsql.instanceUser"
 done
 
+echo "Adding $SERVICE_ACCOUNT_EMAIL as IAM DB User to Cloud SQL Instances..."
 # add service account as Cloud SQL IAM User to all mapped instances
 for INSTANCE in $SQL_INSTANCES;
 do
@@ -99,13 +109,15 @@ do
 done
 
 ######################## PRIVATE IP / SHARED VPC ########################
+echo "Creating Serverless VPC Access Connector..."
 # create serverless VPC access connector
 gcloud compute networks vpc-access connectors create "$CONNECTOR_NAME" \
   --region="$REGION" \
   --subnet="$SUBNET" \
   --subnet-project="$HOST_PROJECT_ID" # if you are not using Shared VPC, omit this line.
-  
+
 ############################## CLOUD RUN ################################
+echo "Building docker container and deploying GroupSync Cloud Run Service..."
 # build container for Cloud Run
 gcloud builds submit \
   --tag "gcr.io/$PROJECT_ID/groupsync-run" \
@@ -122,8 +134,10 @@ gcloud run deploy groupsync-run \
   --vpc-connector "$CONNECTOR_NAME"
 
 SERVICE_URL=$(gcloud run services describe groupsync-run --platform managed --region "$REGION" --format 'value(status.url)')
+echo "Deployed Cloud Run service at URL: $SERVICE_URL"
 
 ########################### CLOUD SCHEDULER ############################
+echo "Creating GroupSync Cloud Scheduler job..."
 # cloud scheduler command (schedules GroupSync to run every 10 minutes)
 gcloud scheduler jobs create http groupsync-scheduler \
   --schedule="$SCHEDULE" \
