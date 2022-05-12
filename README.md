@@ -9,9 +9,9 @@ Currently only the following databases are supported:
 - **PostgreSQL 13, 12, 11, 10, 9.6**
 
 ## Overview
-The GroupSync service at an overview is made of Cloud Scheduler Job(s) and Cloud Run instance(s). 
+The GroupSync service at an overview is made of Cloud Scheduler Job(s) and Cloud Run instance(s).
 
-The Cloud Scheduler Job(s) are configured to run on the interval of your choosing (every 10 mins, 1 hour, daily etc.) When ran, the Cloud Scheduler calls a GroupSync Cloud Run service, passing in the configured request body from the scheduler, which contains parameters that tell the service which IAM groups and which Cloud SQL instances to sync and manage. 
+The Cloud Scheduler Job(s) are configured to run on the interval of your choosing (every 10 mins, 1 hour, daily etc.) When ran, the Cloud Scheduler calls a GroupSync Cloud Run service, passing in the configured request body from the scheduler, which contains parameters that tell the service which IAM groups and which Cloud SQL instances to sync and manage.
 
 <p align="center"><img src="images/basic_architecture.png" width="640"></p>
 
@@ -28,7 +28,7 @@ To run this service successfully, please clone this repository to an environment
 ```
 git clone https://github.com/GoogleCloudPlatform/cloud-sql-iam-db-authn-groups
 ```
- 
+
 Step into the code directory.
 
 ```
@@ -52,7 +52,7 @@ GroupSync requires enabling the following Cloud APIs for a successful deployment
  - [Admin SDK API](https://console.cloud.google.com/apis/api/admin.googleapis.com/overview)
  - [IAM Service Account Credentials API](https://console.cloud.google.com/apis/api/iamcredentials.googleapis.com/overview)
 
- **Note:** If planning to use GroupSync with a Cloud SQL instance that has a Private IP, the following additional APIs need to be enabled. 
+ **Note:** If planning to use GroupSync with a Cloud SQL instance that has a Private IP, the following additional APIs need to be enabled.
  - [Serverless VPC Access API](https://console.cloud.google.com/apis/api/vpcaccess.googleapis.com)
  - [Service Networking API](https://console.cloud.google.com/apis/api/servicenetworking.googleapis.com/overview)
 
@@ -232,7 +232,7 @@ Where:
 - **sql_instances**: List of all Cloud SQL instances to configure.
 - **private_ip** (optional): Boolean flag for private or public IP addresses.
 
-**Note:** These are placeholder values and should be replaced with proper IAM groups and Cloud SQL instance connection names. 
+**Note:** These are placeholder values and should be replaced with proper IAM groups and Cloud SQL instance connection names.
 
 There is an additional optional parameter `"log_level"` for the JSON payload which can be set to one of `"INFO"`, `"DEBUG"`, `"WARNING"`, or `"ERROR"` to change severity of outputted logs. Defaults to `"INFO"` when not specified.
 
@@ -263,7 +263,7 @@ The `--schedule` flag is what controls how often the Cloud Scheduler job will tr
 
 The payload for the PUT request to the Cloud Run service can also be configured for Cloud Scheduler directly through a command line flag by switching out the `--message-body-from-file` flag for the flag `--message-body` from the command above above as follows.
 ```
---message-body="{"iam-groups": ["group@test.com", "group2@test.com"], "sql_instances": ["project:region:instance"], "private_ip": false}"
+--message-body="{"iam_groups": ["group@test.com", "group2@test.com"], "sql_instances": ["project:region:instance"], "private_ip": false}"
 ```
 
 To learn more about the different Cloud Scheduler flags, read the [official documentation](https://cloud.google.com/sdk/gcloud/reference/scheduler/jobs/create/http).
@@ -271,10 +271,10 @@ To learn more about the different Cloud Scheduler flags, read the [official docu
 ## Granting Database Permissions to IAM Group Database Roles
 The Cloud Run service maps each IAM group configured in the JSON payload into a [database role](https://dev.mysql.com/doc/refman/8.0/en/roles.html) on each Cloud SQL instance configured. This database role is then granted to the proper database users that belong to the IAM group, giving them the appropriate database privileges for the IAM group.
 
-The name of the mapped IAM group database role is the email of the IAM group without everything after and including the **"@"** sign of the IAM group email. 
+The name of the mapped IAM group database role is the email of the IAM group without everything after and including the **"@"** sign of the IAM group email.
 (Ex. IAM group with email "example-group@test.com", would map to a database role **"example-group"** on each Cloud SQL instance it is configured with.)
 
-The Cloud Run service verifies that a group role exists or creates one on the database if it does not exist. It is recommended to configure the Cloud Scheduler job(s) and after having it triggered **at least** once, have a Database Administrator or project admin verify the creation of the group roles and **GRANT** the group roles the appropriate privileges on each Cloud SQL instance that should be inherited by database users of those IAM groups on all consecutive Cloud Scheduler runs. 
+The Cloud Run service verifies that a group role exists or creates one on the database if it does not exist. It is recommended to configure the Cloud Scheduler job(s) and after having it triggered **at least** once, have a Database Administrator or project admin verify the creation of the group roles and **GRANT** the group roles the appropriate privileges on each Cloud SQL instance that should be inherited by database users of those IAM groups on all consecutive Cloud Scheduler runs.
 
 To verify the creation of group roles after Cloud Scheduler has triggered at least once, the following command can be run for **MySQL** instances (**PostgreSQL** instances require connecting to the database to verify):
 
@@ -309,7 +309,7 @@ gcloud run services update iam-db-authn-groups --vpc-connector <CONNECTOR_NAME>
 **NOTE:** Private IP connections require that the Cloud SQL instance and the Cloud Run service be connected to the same VPC Network to work correctly.
 
 ## Custom Configurations
-Multiple different Cloud Scheduler and Cloud Run configurations can be configured depending on the Cloud SQL instance to IAM Group mappings required along with the IP address types being used to connect to instances. 
+Multiple different Cloud Scheduler and Cloud Run configurations can be configured depending on the Cloud SQL instance to IAM Group mappings required along with the IP address types being used to connect to instances.
 
 A Cloud Scheduler job maps which IAM group(s) and hence which IAM users to manage permissions for any given Cloud SQL instance(s). When configuring a Cloud Scheduler job, all IAM groups listed in the JSON body will be mapped to all Cloud SQL instances in the JSON body. Therefore, for custom configurations where certain IAM groups need to be mapped to one instance, and other IAM groups to a different Cloud SQL instance, the solution is to deploy multiple Cloud Scheduler jobs.
 
