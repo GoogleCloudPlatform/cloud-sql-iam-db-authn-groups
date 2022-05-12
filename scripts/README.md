@@ -5,6 +5,11 @@ GroupSync is a self-deployed service that provides support for managing [Cloud S
 
 ## Build and Deploy GroupSync using a script
 Below outlines the steps to automate the majority of a GroupSync deployment, allowing for faster and more scalable deployments.
+This deployment uses a script to build the appropriate GroupSync resources:
+- Service Account with required permissions
+- Serverless VPC Access Connector
+- Cloud Run service
+- Cloud Scheduler Job
 
 ### Setup
 To run this service successfully, please clone this repository to an environment that thas the Google Cloud SDK installed and initialized. [(Install and initialize the Cloud SDK)](https://cloud.google.com/sdk/docs/install)
@@ -60,7 +65,7 @@ export SCHEDULE="*/10 * * * *" # schedule how often GroupSync Cloud Scheduler is
 Now the deployment script can be run by executing the following command:
 
 ```bash
-./build-and-deploy-private-ip.sh
+./scripts/build-and-deploy-private-ip.sh
 ```
 
 **NOTE:** Some commands may fail without the GroupSync deployment all-together failing.
