@@ -3,7 +3,7 @@
 
 GroupSync is a self-deployed service that provides support for managing [Cloud SQL IAM Database Authentication](https://cloud.google.com/sql/docs/mysql/authentication) for groups. GroupSync leverages [Cloud Run](https://cloud.google.com/run), [Cloud Scheduler](https://cloud.google.com/scheduler), and the [Cloud SQL Python Connector](https://github.com/googlecloudplatform/cloud-sql-python-connector) to consistently update and sync Cloud SQL instances based on IAM groups. It will create missing database IAM users, GRANT roles to database IAM users based on their IAM groups, and REVOKE roles from database IAM users no longer in IAM groups.
 
-## Build and Deploy GroupSync using a script
+## Build and Deploy GroupSync Using a Script
 Below outlines the steps to automate the majority of a GroupSync deployment, allowing for faster and more scalable deployments.
 This deployment uses a script to build the appropriate GroupSync resources:
 - Service Account with required permissions
@@ -12,7 +12,7 @@ This deployment uses a script to build the appropriate GroupSync resources:
 - Cloud Scheduler Job
 
 ### Setup
-To run this service successfully, please clone this repository to an environment that thas the Google Cloud SDK installed and initialized. [(Install and initialize the Cloud SDK)](https://cloud.google.com/sdk/docs/install)
+To run this service successfully, please clone this repository to an environment that has the Google Cloud SDK installed and initialized. [(Install and initialize the Cloud SDK)](https://cloud.google.com/sdk/docs/install)
 
 ```
 git clone https://github.com/GoogleCloudPlatform/cloud-sql-iam-db-authn-groups
@@ -24,7 +24,7 @@ Step into the code directory.
 cd cloud-sql-iam-db-authn-groups
 ```
 
-### JSON File
+### Create a JSON File
 Each Cloud Scheduler Job requires a JSON payload to tell it which IAM Groups and
 Cloud SQL instances to sync, and an optional flag to toggle between public or
 private IP database connections (defaults to public IP).
@@ -57,7 +57,7 @@ export HOST_PROJECT_ID="" # project ID of Shared VPC host project (optional)
 export CONNECTOR_NAME="" # name to be given to Serverless VPC Access Connector
 export SUBNET="" # the name of an unused /28 subnet for Serverless VPC Access Connector
 
-export PATH_TO_JSON="" # file path to JSON payload containing instance-to-group mappings for Cloud Scheduler
+export PATH_TO_JSON="" # relative file path to JSON file containing instance-to-group mappings for Cloud Scheduler
 export SCHEDULE="*/10 * * * *" # schedule how often GroupSync Cloud Scheduler is called (defaults to 10 mins)
 ```
 
@@ -113,7 +113,7 @@ Replace the following values in the below commands:
 Allow the service account to read database users and their roles.
 
 ```sql
-GRANT SELECT ON mysql.role_edges TO '<SERVICE_ACCOUNT_NAME>';I
+GRANT SELECT ON mysql.role_edges TO '<SERVICE_ACCOUNT_NAME>';
 ```
 
 Allow the service account to **CREATE** group roles for IAM groups if they are missing.
