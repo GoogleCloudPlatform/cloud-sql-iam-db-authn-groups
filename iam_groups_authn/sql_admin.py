@@ -15,6 +15,7 @@
 # sql_admin.py contains functions for interacting with the SQL Admin API
 
 from typing import NamedTuple
+import asyncio
 from iam_groups_authn.mysql import mysql_username
 
 
@@ -69,7 +70,7 @@ async def add_missing_db_users(
             (e.g., "my-project:my-region:my-instance")
         database_type: Type of database for Cloud SQL instance.
     """
-    iam_users, db_users = await iam_future, await db_future
+    iam_users, db_users = await asyncio.gather(iam_future, db_future)
     # find IAM users who are missing as DB users
     if database_type.is_mysql():
         missing_db_users = set(
