@@ -222,11 +222,43 @@ Each Cloud Scheduler Job requires a JSON payload to tell it which IAM Groups and
 An example JSON payload:
 ```
 {
-    "iam_groups": ["group@test.com, "group2@test.com],
-    "sql_instances": ["project:region:instance"],
+    "iam_groups": [
+        "group@test.com",
+        "group2@test.com"
+    ],
+    "sql_instances": [
+        "project:region:instance"
+    ],
     "private_ip": false
 }
 ```
+
+An example of multiple items in JSON payload:
+```
+[
+    {
+        "iam_groups": [
+            "group@test.com",
+            "group2@test.com"
+        ],
+        "sql_instances": [
+            "project:region:instance"
+        ],
+        "private_ip": false
+    },
+    {
+        "iam_groups": [
+            "group@test.com",
+            "group3@test.com"
+        ],
+        "sql_instances": [
+            "project:region:instance2"
+        ],
+        "private_ip": false
+    }
+]
+```
+
 Where:
 - **iam_groups**: List of all IAM Groups to manage IAM database users of.
 - **sql_instances**: List of all Cloud SQL instances to configure.

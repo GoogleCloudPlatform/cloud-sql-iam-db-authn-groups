@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 from quart import Quart
 import quart
 from google.auth import default
@@ -47,9 +48,7 @@ def health_check():
     return "App is running!"
 
 
-@app.route("/run", methods=["PUT"])
-async def run_groups_authn():
-    body = await quart.request.get_json(force=True)
+async def run_groups_authn(body):
     # try reading in required request parameters and verify type, otherwise throw custom error
     sql_instances = body.get("sql_instances")
     if sql_instances is None or type(sql_instances) is not list:
@@ -87,3 +86,18 @@ async def run_groups_authn():
     await groups_sync(iam_groups, sql_instances, creds, private_ip)
 
     return "Sync successful.", 200
+
+
+@app.route("/run", methods=["PUT"])
+async def run_groups_authn_wrapper():
+    body = await quart.request.get_json(force=True)
+    if isinstance(body, list):
+        response = []
+        for config in body:
+            status, _ = await run_groups_authn(config)
+            response.append(status)
+        return json.dumps(response), 200
+    elif isinstance(body, dict):
+        return await run_groups_authn(config)
+    else:
+        return "Incorrect input type, expected single json object or list of json objects", 400
