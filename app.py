@@ -94,10 +94,14 @@ async def run_groups_authn_wrapper():
     if isinstance(body, list):
         response = []
         for config in body:
-            status, _ = await run_groups_authn(config)
+            try:
+                status, _ = await run_groups_authn(config)
+            except Exception as e:
+                logging.exception(e)
+                status = "An exception occured."
             response.append(status)
         return json.dumps(response), 200
-    elif isinstance(body, dict):
-        return await run_groups_authn(config)
+    if isinstance(body, dict):
+        return await run_groups_authn(body)
     else:
         return "Incorrect input type, expected single json object or list of json objects", 400
