@@ -222,7 +222,7 @@ Each Cloud Scheduler Job requires a JSON payload to tell it which IAM Groups and
 An example JSON payload:
 ```
 {
-    "iam_groups": ["group@test.com, "group2@test.com],
+    "iam_groups": ["group@test.com", "group2@test.com"],
     "sql_instances": ["project:region:instance"],
     "private_ip": false
 }
