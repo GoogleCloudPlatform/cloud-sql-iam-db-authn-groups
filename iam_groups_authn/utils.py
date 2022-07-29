@@ -43,6 +43,7 @@ class DatabaseVersion(Enum):
     All supported database versions for service."""
 
     MYSQL_8_0 = "MYSQL_8_0"
+    POSTGRES_14 = "POSTGRES_14"
     POSTGRES_13 = "POSTGRES_13"
     POSTGRES_12 = "POSTGRES_12"
     POSTGRES_11 = "POSTGRES_11"
