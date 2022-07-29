@@ -28,8 +28,6 @@ sql_instance = os.environ["MYSQL_INSTANCE"]
 long_iam_group = [os.environ["LONG_GROUP_EMAIL"]]
 test_user = os.environ["TEST_USER"]
 
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "service.json"
-
 scopes = [
     "https://www.googleapis.com/auth/admin.directory.group.member",
     "https://www.googleapis.com/auth/sqlservice.admin",
