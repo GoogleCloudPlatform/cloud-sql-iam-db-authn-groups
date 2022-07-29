@@ -20,6 +20,7 @@ from google.cloud.sql.connector.instance_connection_manager import IPTypes
 import json
 from aiohttp import ClientSession
 from enum import Enum
+from typing import Any, Optional
 import logging
 from iam_groups_authn.sql_admin import (
     get_instance_users,
@@ -39,7 +40,9 @@ from iam_groups_authn.postgres import (
 )
 
 
-async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
+async def groups_sync(
+    iam_groups, sql_instances, credentials, group_roles, private_ip=False
+):
     """GroupSync method to sync IAM groups with Cloud SQL instances.
 
     Args:
@@ -48,6 +51,18 @@ async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
         sql_instances: List of instance connection names for Cloud SQL instances to sync.
             (e.g. ["<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>"])
         credentials: OAuth2 credentials.
+        group_roles:(optional) Dict of IAM group emails as keys and group database
+            role names as values. The group database role name is the database role
+            that will be granted/revoked within GroupSync to each member of the
+            corresponding IAM group. Group role names default to IAM group email
+            without the domain (everything before the @, i.e "iam-group@test.com"
+            would have group role name of "iam-group".
+            (e.g.
+                {
+                    "iam-group@test.com": "engineering",
+                    "iam-group2@test.com": "accounting"
+                }
+            )
         private_ip:(optional) Boolean flag for connecting to Cloud SQL databases with
             Private or Public IPs. (defaults to False for Public IP)
     """
@@ -71,26 +86,24 @@ async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
 
     for instance in sql_instances:
         instance_task = asyncio.create_task(get_instance_users(user_service, instance))
-        database_version_task = asyncio.create_task(
-            user_service.get_database_version(
-                InstanceConnectionName(*instance.split(":"))
-            )
+        database_version = await user_service.get_database_version(
+            InstanceConnectionName(*instance.split(":"))
         )
-        instance_tasks[instance] = (instance_task, database_version_task)
+        # get database version of instance and check if supported
+        try:
+            database_version = DatabaseVersion(database_version)
+        except ValueError as e:
+            raise ValueError(
+                f"Unsupported database version for instance `{instance}`. Current supported versions are: {list(DatabaseVersion.__members__.keys())}"
+            ) from e
+        # verify that group role for database won't exceed character limit
+        verify_group_role_length(iam_groups, group_roles, database_version)
+        instance_tasks[instance] = (instance_task, database_version)
 
     # create pairings of iam groups and instances
     for group in iam_groups:
         for instance in sql_instances:
-
-            # get database version of instance and check if supported
-            database_version = await instance_tasks[instance][1]
-            try:
-                database_version = DatabaseVersion(database_version)
-            except ValueError as e:
-                raise ValueError(
-                    f"Unsupported database version for instance `{instance}`. Current supported versions are: {list(DatabaseVersion.__members__.keys())}"
-                ) from e
-
+            database_version = instance_tasks[instance][1]
             # add missing IAM group members to database
             add_users_task = asyncio.create_task(
                 add_missing_db_users(
@@ -115,7 +128,7 @@ async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
             )
 
             # verify role for IAM group exists on database, create if does not exist
-            role = mysql_username(group)
+            role = group_roles.get(group, mysql_username(group))
             verify_role_task = asyncio.create_task(role_service.create_group_role(role))
 
             # get database users who have group role
@@ -448,3 +461,47 @@ async def grant_iam_group_role(
     await role_service.grant_group_role(role, users_to_grant)
 
     return users_to_grant
+
+
+class GroupRoleMaxLengthError(Exception):
+    """Error raised if group role exceeds database character limit"""
+
+    def __init__(self, *args: Any) -> None:
+        super(GroupRoleMaxLengthError, self).__init__(self, *args)
+
+
+def verify_group_role_length(
+    iam_groups: list, group_roles: Optional[dict], database_version: DatabaseVersion
+) -> None:
+    """Verify that group role names created or used by GroupSync do not
+    exceed the character limit for the database.
+    iam_groups: List of iam group emails for IAM groups to sync.
+        (e.g. ["iam-group@test.com", "iam-group2@test.com"])
+    sql_instances: List of instance connection names for Cloud SQL instances to sync.
+        (e.g. ["<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>"])
+        credentials: OAuth2 credentials.
+    group_roles:(optional) Dict of IAM group emails as keys and group database
+        role names as values. The group database role name is the database role
+        that will be granted/revoked within GroupSync to each member of the
+        corresponding IAM group. Group role names default to IAM group email
+        without the domain (everything before the @, i.e "iam-group@test.com"
+        would have group role name of "iam-group".
+        (e.g.
+            {
+                "iam-group@test.com": "engineering",
+                "iam-group2@test.com": "accounting"
+            }
+        )
+    """
+    # character limit for username/role for MySQL is 32, Postgres is 63
+    char_limit = 32 if database_version.is_mysql() else 63
+    for iam_group in iam_groups:
+        # character count for group role
+        char_role = len(group_roles.get(iam_group, mysql_username(iam_group)))
+        if char_role > char_limit:
+            raise GroupRoleMaxLengthError(
+                f"Group database role for IAM group `{iam_group}` "
+                f"would exceed character limit of {char_limit}, please specify"
+                " request parameter `group_roles` to map group role to shorter"
+                " length."
+            )

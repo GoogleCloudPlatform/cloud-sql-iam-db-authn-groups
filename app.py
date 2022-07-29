@@ -18,7 +18,7 @@ from google.auth import default
 from google.auth.transport.requests import Request
 import logging
 import google.cloud.logging
-from iam_groups_authn.sync import groups_sync
+from iam_groups_authn.sync import GroupRoleMaxLengthError, groups_sync
 
 # define OAuth2 scopes
 SCOPES = [
@@ -65,6 +65,13 @@ async def run_groups_authn():
             400,
         )
 
+    group_roles = body.get("group_roles", dict())
+    if type(group_roles) is not dict:
+        return (
+            "Incorrect type for request parameter: `group_roles`, should be dict/JSON",
+            400,
+        )     
+
     # try reading in private_ip param, default to False
     private_ip = body.get("private_ip", False)
     if type(private_ip) is not bool:
@@ -83,7 +90,13 @@ async def run_groups_authn():
         request = Request()
         creds.refresh(request)
 
-    # sync IAM groups to Cloud SQL instances
-    await groups_sync(iam_groups, sql_instances, creds, private_ip)
-
+    try:
+        # sync IAM groups to Cloud SQL instances
+        await groups_sync(iam_groups, sql_instances, creds, group_roles, private_ip)
+    except GroupRoleMaxLengthError as e:
+        logging.exception(f"Error during sync: {str(e)}")
+        return (
+            str(e),
+            400,
+        )
     return "Sync successful.", 200

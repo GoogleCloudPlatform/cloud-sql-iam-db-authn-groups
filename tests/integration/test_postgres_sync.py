@@ -117,7 +117,7 @@ async def test_service_postgres(credentials):
         print("Member must already belong to IAM Group.")
 
     # run groups sync
-    await groups_sync(iam_groups, [sql_instance], credentials, False)
+    await groups_sync(iam_groups, [sql_instance], credentials, dict(), False)
 
     # check that test_user has been created as database user
     db_users = await get_instance_users(user_service, sql_instance)
@@ -140,7 +140,7 @@ async def test_service_postgres(credentials):
     time.sleep(5)
 
     # run groups sync
-    await groups_sync(iam_groups, [sql_instance], credentials, False)
+    await groups_sync(iam_groups, [sql_instance], credentials, dict(), False)
 
     # verify test_user no longer has group role
     users_with_role = check_role_postgres(pool, mysql_username(iam_groups[0]))
