@@ -76,18 +76,46 @@ def setup_and_teardown():
 
 
 @pytest.mark.asyncio
-async def test_long_iam_group_email(credentials):
-    """Test end-to-end use case for mapping a IAM group email that exceeds
-    character limit to a shorter group role.
+async def test_long_iam_group_email_without_mapping(credentials):
+    """Test IAM group email that exceeds character limit, should throw custom error.
 
     Test plan:
-        - Verifies group role is not a database user
         - Run GroupSync with long IAM email (error)
-        - Run GroupSync with group role mapping (success)
-        - Verify IAM member of group has been granted group role
+        - Verify group role is not a database user
     """
+    # create aiohttp client session for async API calls
+    client_session = ClientSession(headers={"Content-Type": "application/json"})
 
-    # remove group role if it already exists
+    # check that group role is not a database user
+    user_service = UserService(client_session, credentials)
+    db_users = await get_instance_users(user_service, sql_instance)
+    assert mysql_username(long_iam_group[0]) not in db_users
+
+    # run groups_sync with email exceeding char limit
+    with pytest.raises(GroupRoleMaxLengthError):
+        await groups_sync(long_iam_group, [sql_instance], credentials, dict(), False)
+
+    # check that group role has not been created as database user
+    db_users = await get_instance_users(user_service, sql_instance)
+    assert mysql_username(long_iam_group[0]) not in db_users
+
+    # close aiohttp client session for graceful exit
+    if not client_session.closed:
+        await client_session.close()
+
+
+@pytest.mark.asyncio
+async def test_long_iam_group_email_with_mapping(credentials):
+    """Test IAM group email that exceeds character limit with
+    group_roles mapping, should succeed.
+
+    Test plan:
+        - Verify group role is not a database user
+        - Run GroupSync with long IAM email and group_roles mapping
+        - Verify mapped group role is a database user
+        - Verify test user has been granted mapped group role
+    """
+    # remove mapped group role if it already exists
     try:
         delete_database_user(sql_instance, "short-group-role", credentials)
     except Exception:
@@ -96,18 +124,15 @@ async def test_long_iam_group_email(credentials):
     # create aiohttp client session for async API calls
     client_session = ClientSession(headers={"Content-Type": "application/json"})
 
-    # check that test_user is not a database user
+    # check that mapped group role is not a database user
     user_service = UserService(client_session, credentials)
     db_users = await get_instance_users(user_service, sql_instance)
-    assert mysql_username("short-group-role") not in db_users
-
-    # run groups_sync with email exceeding char limit
-    with pytest.raises(GroupRoleMaxLengthError):
-        await groups_sync(long_iam_group, [sql_instance], credentials, dict(), False)
+    assert "short-group-role" not in db_users
 
     # run groups_sync with group role mapping
     group_roles = {long_iam_group[0]: "short-group-role"}
     await groups_sync(long_iam_group, [sql_instance], credentials, group_roles, False)
+
     # check that group role has been created as database user
     db_users = await get_instance_users(user_service, sql_instance)
     assert "short-group-role" in db_users

@@ -89,13 +89,6 @@ async def groups_sync(
         database_version = await user_service.get_database_version(
             InstanceConnectionName(*instance.split(":"))
         )
-        # get database version of instance and check if supported
-        try:
-            database_version = DatabaseVersion(database_version)
-        except ValueError as e:
-            raise ValueError(
-                f"Unsupported database version for instance `{instance}`. Current supported versions are: {list(DatabaseVersion.__members__.keys())}"
-            ) from e
         # verify that group role for database won't exceed character limit
         verify_group_role_length(iam_groups, group_roles, database_version)
         instance_tasks[instance] = (instance_task, database_version)
@@ -329,7 +322,11 @@ class UserService:
                 "[%s:%s:%s] Database version found: %s"
                 % (project, region, instance, database_version)
             )
-            return database_version
+            return DatabaseVersion(database_version)
+        except ValueError as e:
+            raise ValueError(
+                f"Unsupported database version for instance `{instance}`. Current supported versions are: {list(DatabaseVersion.__members__.keys())}"
+            ) from e
         except Exception as e:
             raise Exception(
                 f"Error: Failed to get the database version for `{instance_connection_name}`. Verify instance connection name and instance details."
