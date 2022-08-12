@@ -147,5 +147,5 @@ async def test_service_postgres(credentials):
     assert test_user not in users_with_role
 
     # close aiohttp client session for graceful exit
-    if client_session.closed:
+    if not client_session.closed:
         await client_session.close()
