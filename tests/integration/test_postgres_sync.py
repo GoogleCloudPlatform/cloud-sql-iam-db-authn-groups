@@ -76,6 +76,8 @@ def setup_and_teardown():
         delete_database_user(sql_instance, test_user, credentials)
         # re-add member to IAM group
         add_iam_member(iam_groups[0], test_user, credentials)
+        # wait 30 seconds, adding IAM member is slow
+        time.sleep(30)
     except Exception:
         print("------------------------Cleanup Failed!------------------------")
 
