@@ -111,8 +111,8 @@ async def test_service_postgres(credentials):
     # make sure test_user is member of IAM group
     try:
         add_iam_member(iam_groups[0], test_user, credentials)
-        # wait 5 seconds, adding IAM member is slow
-        time.sleep(5)
+        # wait 30 seconds, adding IAM member is slow
+        time.sleep(30)
     except Exception:
         print("Member must already belong to IAM Group.")
 
@@ -136,8 +136,8 @@ async def test_service_postgres(credentials):
     # remove test_user from IAM group
     delete_iam_member(iam_groups[0], test_user, credentials)
 
-    # wait 5 seconds, deleting IAM member is slow
-    time.sleep(5)
+    # wait 30 seconds, deleting IAM member is slow
+    time.sleep(30)
 
     # run groups sync
     await groups_sync(iam_groups, [sql_instance], credentials, False)
