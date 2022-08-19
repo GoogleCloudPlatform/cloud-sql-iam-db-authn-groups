@@ -86,110 +86,125 @@ async def groups_sync(
 
     for instance in sql_instances:
         instance_task = asyncio.create_task(get_instance_users(user_service, instance))
-        database_version = await user_service.get_database_version(
-            InstanceConnectionName(*instance.split(":"))
+        database_version_task = asyncio.create_task(
+            user_service.get_database_version(
+                InstanceConnectionName(*instance.split(":"))
+            )
         )
-        # verify that group role for database won't exceed character limit
-        verify_group_role_length(iam_groups, group_roles, database_version)
-        instance_tasks[instance] = (instance_task, database_version)
+        instance_tasks[instance] = (instance_task, database_version_task)
 
     # create pairings of iam groups and instances
     for group in iam_groups:
         for instance in sql_instances:
-            database_version = instance_tasks[instance][1]
-            # add missing IAM group members to database
-            add_users_task = asyncio.create_task(
-                add_missing_db_users(
-                    user_service,
-                    group_tasks[group],
-                    instance_tasks[instance][0],
-                    instance,
-                    database_version,
+            try:
+                database_version = await instance_tasks[instance][1]
+                # verify that group role for database won't exceed character limit
+                verify_group_role_length(iam_groups, group_roles, database_version)
+                # add missing IAM group members to database
+                add_users_task = asyncio.create_task(
+                    add_missing_db_users(
+                        user_service,
+                        group_tasks[group],
+                        instance_tasks[instance][0],
+                        instance,
+                        database_version,
+                    )
                 )
-            )
 
-            # initialize database connection pool
-            if database_version.is_mysql():
-                db = init_mysql_connection_engine(instance, credentials, ip_type)
-                role_service = MysqlRoleService(db)
-            else:
-                db = init_postgres_connection_engine(instance, credentials, ip_type)
-                role_service = PostgresRoleService(db)
-            logging.debug(
-                "[%s][%s] Initialized a %s connection pool."
-                % (instance, group, database_version.value)
-            )
-
-            # verify role for IAM group exists on database, create if does not exist
-            role = group_roles.get(group, mysql_username(group))
-            verify_role_task = asyncio.create_task(role_service.create_group_role(role))
-
-            # get database users who have group role
-            users_with_roles_task = asyncio.create_task(
-                get_users_with_roles(role_service, role)
-            )
-
-            # await dependent tasks
-            results = await asyncio.gather(
-                add_users_task, verify_role_task, return_exceptions=True
-            )
-            # raise exception if found
-            for result in results:
-                if issubclass(type(result), Exception):
-                    raise result
-
-            # log IAM users added as database users
-            added_users = results[0]
-            logging.debug(
-                "[%s][%s] Users added to database: %s."
-                % (instance, group, list(added_users))
-            )
-
-            # revoke group role from users no longer in IAM group
-            revoke_role_task = asyncio.create_task(
-                revoke_iam_group_role(
-                    role_service,
-                    role,
-                    users_with_roles_task,
-                    group_tasks[group],
-                    database_version,
+                # initialize database connection pool
+                if database_version.is_mysql():
+                    db = init_mysql_connection_engine(instance, credentials, ip_type)
+                    role_service = MysqlRoleService(db)
+                else:
+                    db = init_postgres_connection_engine(instance, credentials, ip_type)
+                    role_service = PostgresRoleService(db)
+                logging.debug(
+                    "[%s][%s] Initialized a %s connection pool."
+                    % (instance, group, database_version.value)
                 )
-            )
 
-            # grant group role to IAM users who are missing it on database
-            grant_role_task = asyncio.create_task(
-                grant_iam_group_role(
-                    role_service,
-                    role,
-                    users_with_roles_task,
-                    group_tasks[group],
-                    database_version,
+                # verify role for IAM group exists on database, create if does not exist
+                role = group_roles.get(group, mysql_username(group))
+                verify_role_task = asyncio.create_task(
+                    role_service.create_group_role(role)
                 )
-            )
-            results = await asyncio.gather(
-                revoke_role_task, grant_role_task, return_exceptions=True
-            )
-            # raise exception if found
-            for result in results:
-                if issubclass(type(result), Exception):
-                    raise result
 
-            # log sync info
-            revoked_users, granted_users = results
-            logging.info(
-                "[%s][%s] Sync successful: %s users were revoked group role, %s users were granted group role."
-                % (instance, group, len(revoked_users), len(granted_users))
-            )
-            logging.debug(
-                "[%s][%s] Users revoked role: %s." % (instance, group, revoked_users)
-            )
-            logging.debug(
-                "[%s][%s] Users granted role: %s." % (instance, group, granted_users)
-            )
+                # get database users who have group role
+                users_with_roles_task = asyncio.create_task(
+                    get_users_with_roles(role_service, role)
+                )
 
-    # close aiohttp client session for graceful exit
-    if not client_session.closed:
-        await client_session.close()
+                # await dependent tasks
+                results = await asyncio.gather(
+                    add_users_task, verify_role_task, return_exceptions=True
+                )
+                # raise exception if found
+                for result in results:
+                    if issubclass(type(result), Exception):
+                        raise result
+
+                # log IAM users added as database users
+                added_users = results[0]
+                logging.debug(
+                    "[%s][%s] Users added to database: %s."
+                    % (instance, group, list(added_users))
+                )
+
+                # revoke group role from users no longer in IAM group
+                revoke_role_task = asyncio.create_task(
+                    revoke_iam_group_role(
+                        role_service,
+                        role,
+                        users_with_roles_task,
+                        group_tasks[group],
+                        database_version,
+                    )
+                )
+
+                # grant group role to IAM users who are missing it on database
+                grant_role_task = asyncio.create_task(
+                    grant_iam_group_role(
+                        role_service,
+                        role,
+                        users_with_roles_task,
+                        group_tasks[group],
+                        database_version,
+                    )
+                )
+                results = await asyncio.gather(
+                    revoke_role_task, grant_role_task, return_exceptions=True
+                )
+                # raise exception if found
+                for result in results:
+                    if issubclass(type(result), Exception):
+                        raise result
+
+                # log sync info
+                revoked_users, granted_users = results
+                logging.info(
+                    "[%s][%s] Sync successful: %s users were revoked group role, %s users were granted group role."
+                    % (instance, group, len(revoked_users), len(granted_users))
+                )
+                logging.debug(
+                    "[%s][%s] Users revoked role: %s."
+                    % (instance, group, revoked_users)
+                )
+                logging.debug(
+                    "[%s][%s] Users granted role: %s."
+                    % (instance, group, granted_users)
+                )
+            # log if sync failed for instance and group pair
+            except Exception as e:
+                logging.info(
+                    "[%s][%s] Sync failed with error message: {%s} "
+                    % (instance, group, str(e))
+                )
+                raise
+
+            finally:
+                # close aiohttp client session for graceful exit
+                if not client_session.closed:
+                    await client_session.close()
 
 
 class UserService:
