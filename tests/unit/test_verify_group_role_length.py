@@ -35,14 +35,16 @@ def test_group_email_exceeds_limit(
     group_roles = dict()
     # test mysql (exceeds 32 chars)
     with pytest.raises(GroupRoleMaxLengthError):
-        verify_group_role_length(iam_groups, group_roles, database_version)
+        for group in iam_groups:
+            verify_group_role_length(group, group_roles, database_version)
     # test postgres (exceed 63 chars)
     postgres_groups = [
         "super-super-super-super-super-duper-duper-duper-duper-duper-long-email@test.com"
     ]
     database_version = DatabaseVersion.POSTGRES_13
     with pytest.raises(GroupRoleMaxLengthError):
-        verify_group_role_length(postgres_groups, group_roles, database_version)
+        for group in postgres_groups:
+            verify_group_role_length(group, group_roles, database_version)
 
 
 def test_custom_group_role_mapping(
@@ -52,7 +54,8 @@ def test_custom_group_role_mapping(
     # add short group name to show that only role mappings for long emails are required
     iam_groups.append("short-group@test.com")
     group_roles = {"super-super-duper-duper-long-email@test.com": "custom-group-role"}
-    verify_group_role_length(iam_groups, group_roles, database_version)
+    for group in iam_groups:
+        verify_group_role_length(group, group_roles, database_version)
 
 
 def test_custom_group_role_mapping_exceeds_limit(
@@ -63,4 +66,5 @@ def test_custom_group_role_mapping_exceeds_limit(
         "super-super-duper-duper-long-email@test.com": "super-super-duper-duper-long-role"
     }
     with pytest.raises(GroupRoleMaxLengthError):
-        verify_group_role_length(iam_groups, group_roles, database_version)
+        for group in iam_groups:
+            verify_group_role_length(group, group_roles, database_version)
