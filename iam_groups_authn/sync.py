@@ -87,15 +87,13 @@ async def groups_sync(
             group_tasks[group] = group_task
 
         for instance in sql_instances:
-            instance_task = asyncio.create_task(
-                get_instance_users(user_service, instance)
-            )
+            users_task = asyncio.create_task(get_instance_users(user_service, instance))
             database_version_task = asyncio.create_task(
                 user_service.get_database_version(
                     InstanceConnectionName(*instance.split(":"))
                 )
             )
-            instance_tasks[instance] = (instance_task, database_version_task)
+            instance_tasks[instance] = (users_task, database_version_task)
 
         # hold all pairings of group-to-instance async tasks
         sync_tasks = []
@@ -161,8 +159,7 @@ async def sync_group(
             db = init_postgres_connection_engine(instance, credentials, ip_type)
             role_service = PostgresRoleService(db)
         logging.debug(
-            "[%s][%s] Initialized a %s connection pool."
-            % (instance, group, database_version.value)
+            f"[{instance}][{group}] Initialized a {database_version.value} connection pool."
         )
 
         # verify role for IAM group exists on database, create if does not exist
@@ -175,19 +172,11 @@ async def sync_group(
         )
 
         # await dependent tasks
-        results = await asyncio.gather(
-            add_users_task, verify_role_task, return_exceptions=True
-        )
-        # raise exception if found
-        for result in results:
-            if issubclass(type(result), Exception):
-                raise result
+        added_users, _ = await asyncio.gather(add_users_task, verify_role_task)
 
         # log IAM users added as database users
-        added_users = results[0]
         logging.debug(
-            "[%s][%s] Users added to database: %s."
-            % (instance, group, list(added_users))
+            f"[{instance}][{group}] Users added to database: {list(added_users)}."
         )
 
         # revoke group role from users no longer in IAM group
@@ -211,31 +200,19 @@ async def sync_group(
                 database_version,
             )
         )
-        results = await asyncio.gather(
-            revoke_role_task, grant_role_task, return_exceptions=True
+        revoked_users, granted_users = await asyncio.gather(
+            revoke_role_task, grant_role_task
         )
-        # raise exception if found
-        for result in results:
-            if issubclass(type(result), Exception):
-                raise result
 
         # log sync info
-        revoked_users, granted_users = results
         logging.info(
-            "[%s][%s] Sync successful: %s users were revoked group role, %s users were granted group role."
-            % (instance, group, len(revoked_users), len(granted_users))
+            f"[{instance}][{group}] Sync successful: {len(revoked_users)} users were revoked group role, {len(granted_users)} users were granted group role."
         )
-        logging.debug(
-            "[%s][%s] Users revoked role: %s." % (instance, group, revoked_users)
-        )
-        logging.debug(
-            "[%s][%s] Users granted role: %s." % (instance, group, granted_users)
-        )
+        logging.debug(f"[{instance}][{group}] Users revoked role: {revoked_users}.")
+        logging.debug(f"[{instance}][{group}] Users granted role: {granted_users}.")
     # log if sync failed for instance and group pair
     except Exception as e:
-        logging.info(
-            "[%s][%s] Sync failed with error message: %s " % (instance, group, str(e))
-        )
+        logging.info(f"[{instance}][{group}] Sync failed with error message: {str(e)} ")
         raise
 
 
@@ -366,8 +343,7 @@ class UserService:
             results = json.loads(await resp.text())
             database_version = results.get("databaseVersion")
             logging.debug(
-                "[%s:%s:%s] Database version found: %s"
-                % (project, region, instance, database_version)
+                f"[{project}:{region}:{instance}] Database version found: {database_version}"
             )
             return DatabaseVersion(database_version)
         except ValueError as e:

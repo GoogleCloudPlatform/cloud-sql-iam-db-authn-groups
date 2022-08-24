@@ -73,6 +73,7 @@ def setup_and_teardown():
         delete_database_user(sql_instance, "short-group-role", credentials)
     except Exception:
         print("------------------------Cleanup Failed!------------------------")
+        raise
 
 
 @pytest.mark.asyncio
@@ -84,24 +85,24 @@ async def test_long_iam_group_email_without_mapping(credentials):
         - Verify group role is not a database user
     """
     # create aiohttp client session for async API calls
-    client_session = ClientSession(headers={"Content-Type": "application/json"})
+    async with ClientSession(
+        headers={"Content-Type": "application/json"}
+    ) as client_session:
 
-    # check that group role is not a database user
-    user_service = UserService(client_session, credentials)
-    db_users = await get_instance_users(user_service, sql_instance)
-    assert mysql_username(long_iam_group[0]) not in db_users
+        # check that group role is not a database user
+        user_service = UserService(client_session, credentials)
+        db_users = await get_instance_users(user_service, sql_instance)
+        assert mysql_username(long_iam_group[0]) not in db_users
 
-    # run groups_sync with email exceeding char limit
-    with pytest.raises(GroupRoleMaxLengthError):
-        await groups_sync(long_iam_group, [sql_instance], credentials, dict(), False)
+        # run groups_sync with email exceeding char limit
+        with pytest.raises(GroupRoleMaxLengthError):
+            await groups_sync(
+                long_iam_group, [sql_instance], credentials, dict(), False
+            )
 
-    # check that group role has not been created as database user
-    db_users = await get_instance_users(user_service, sql_instance)
-    assert mysql_username(long_iam_group[0]) not in db_users
-
-    # close aiohttp client session for graceful exit
-    if not client_session.closed:
-        await client_session.close()
+        # check that group role has not been created as database user
+        db_users = await get_instance_users(user_service, sql_instance)
+        assert mysql_username(long_iam_group[0]) not in db_users
 
 
 @pytest.mark.asyncio
