@@ -73,7 +73,6 @@ def setup_and_teardown():
         delete_database_user(sql_instance, "short-group-role", credentials)
     except Exception:
         print("------------------------Cleanup Failed!------------------------")
-        raise
 
 
 @pytest.mark.asyncio
