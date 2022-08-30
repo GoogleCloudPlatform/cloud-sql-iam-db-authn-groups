@@ -29,6 +29,7 @@ import time
 sql_instance = os.environ["MYSQL_INSTANCE"]
 iam_groups = [os.environ["IAM_GROUPS"]]
 test_user = os.environ["TEST_USER"]
+sa_user = os.environ["SA_USER"]
 
 scopes = [
     "https://www.googleapis.com/auth/admin.directory.group.member",
@@ -73,8 +74,12 @@ def setup_and_teardown():
     try:
         # cleanup user from database
         delete_database_user(sql_instance, mysql_username(test_user), credentials)
+        # cleanup service account from database
+        delete_database_user(sql_instance, mysql_username(sa_user), credentials)
         # re-add member to IAM group
         add_iam_member(iam_groups[0], test_user, credentials)
+        # re-add service account to IAM group
+        add_iam_member(iam_groups[0], sa_user, credentials)
         # wait 30 seconds, adding IAM member is slow
         time.sleep(30)
     except Exception:
@@ -95,11 +100,12 @@ async def test_service_mysql(credentials):
         - Verifies test user no longer has group role
     """
 
-    # remove database user if they exist
+    # remove database users if they exist
     try:
         delete_database_user(sql_instance, mysql_username(test_user), credentials)
+        delete_database_user(sql_instance, mysql_username(sa_user), credentials)
     except Exception:
-        print("Database user must already have been deleted!")
+        print("Database users must already have been deleted!")
 
     # create aiohttp client session for async API calls
     client_session = ClientSession(headers={"Content-Type": "application/json"})
@@ -108,14 +114,16 @@ async def test_service_mysql(credentials):
     user_service = UserService(client_session, credentials)
     db_users = await get_instance_users(user_service, sql_instance)
     assert mysql_username(test_user) not in db_users
+    assert mysql_username(sa_user) not in db_users
 
-    # make sure test_user is member of IAM group
+    # make sure users are members of IAM group
     try:
         add_iam_member(iam_groups[0], test_user, credentials)
+        add_iam_member(iam_groups[0], sa_user, credentials)
         # wait 30 seconds, adding IAM member is slow
         time.sleep(30)
     except Exception:
-        print("Member must already belong to IAM Group.")
+        print("Members must already belong to IAM Group.")
 
     # run groups sync
     await groups_sync(iam_groups, [sql_instance], credentials, dict(), False)
@@ -123,6 +131,7 @@ async def test_service_mysql(credentials):
     # check that test_user has been created as database user
     db_users = await get_instance_users(user_service, sql_instance)
     assert mysql_username(test_user) in db_users
+    assert mysql_username(sa_user) in db_users
 
     # create database connection to instance
     pool = init_mysql_connection_engine(sql_instance, credentials)
@@ -134,8 +143,9 @@ async def test_service_mysql(credentials):
         for member in iam_members:
             assert mysql_username(member) in users_with_role
 
-    # remove test_user from IAM group
+    # remove users from IAM group
     delete_iam_member(iam_groups[0], test_user, credentials)
+    delete_iam_member(iam_groups[0], sa_user, credentials)
 
     # wait 30 seconds, deleting IAM member is slow
     time.sleep(30)
@@ -146,6 +156,7 @@ async def test_service_mysql(credentials):
     # verify test_user no longer has group role
     users_with_role = check_role_mysql(pool, mysql_username(iam_groups[0]))
     assert mysql_username(test_user) not in users_with_role
+    assert mysql_username(sa_user) not in users_with_role
 
     # close aiohttp client session for graceful exit
     if not client_session.closed:

@@ -24,7 +24,7 @@ class FakeUserService:
     def __init__(self):
         pass
 
-    async def insert_db_user(self, user, instance_connection_name):
+    async def insert_db_user(self, user, instance_connection_name, database_type):
         pass
 
 

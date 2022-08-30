@@ -299,7 +299,7 @@ class UserService:
                 f"Error: Failed to get the database users for instance `{instance_connection_name}`. Verify instance connection name and instance details."
             ) from e
 
-    async def insert_db_user(self, user_email, instance_connection_name):
+    async def insert_db_user(self, user_email, instance_connection_name, database_type):
         """Create DB user from IAM user.
 
         Given an IAM user's email, insert the IAM user as a DB user for Cloud SQL instance.
@@ -309,6 +309,7 @@ class UserService:
             instance_connection_name: InstanceConnectionName namedTuple.
                 (e.g. InstanceConnectionName(project='my-project', region='my-region',
                 instance='my-instance'))
+            database_type: Cloud SQL database version.
         """
         # build request to SQL Admin API
         project = instance_connection_name.project
@@ -316,10 +317,16 @@ class UserService:
         url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project}/instances/{instance}/users"
         # if service account, add service account IAM database user
         if user_email.endswith(".gserviceaccount.com"):
-            user = {
-                "name": user_email.removesuffix(".gserviceaccount.com"),
-                "type": "CLOUD_IAM_SERVICE_ACCOUNT",
-            }
+            if database_type.is_mysql():
+                user = {
+                    "name": user_email,
+                    "type": "CLOUD_IAM_SERVICE_ACCOUNT",
+                }
+            else:
+                user = {
+                    "name": user_email.removesuffix(".gserviceaccount.com"),
+                    "type": "CLOUD_IAM_SERVICE_ACCOUNT",
+                }
         else:
             user = {"name": user_email, "type": "CLOUD_IAM_USER"}
 
