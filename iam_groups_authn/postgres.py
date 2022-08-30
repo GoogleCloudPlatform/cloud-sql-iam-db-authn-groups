@@ -22,6 +22,23 @@ from iam_groups_authn.utils import RoleService, async_wrap
 from google.auth.transport.requests import Request
 
 
+def postgres_username(iam_email):
+    """Get Postgres username from user or service account email.
+
+    Given an IAM user or IAM service account email, format their Postgres
+    database username accordingly. Do nothing for user emails, remove
+    '.gserviceaccount.com' suffix from service account emails.
+
+    Args:
+        iam_email: An IAM user or service account email.
+
+    Returns:
+        username: The IAM user or service account Postgres DB username.
+    """
+    username = iam_email.removesuffix(".gserviceaccount.com")
+    return username
+
+
 class PostgresRoleService(RoleService):
     """Class for managing a Postgres DB user's role grants."""
 

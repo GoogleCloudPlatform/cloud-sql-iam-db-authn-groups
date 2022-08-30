@@ -16,6 +16,7 @@
 
 from typing import NamedTuple
 from iam_groups_authn.mysql import mysql_username
+from iam_groups_authn.postgres import postgres_username
 
 
 class InstanceConnectionName(NamedTuple):
@@ -76,7 +77,9 @@ async def add_missing_db_users(
             [user for user in iam_users if mysql_username(user) not in db_users]
         )
     else:
-        missing_db_users = set([user for user in iam_users if user not in db_users])
+        missing_db_users = set(
+            [user for user in iam_users if postgres_username(user) not in db_users]
+        )
     # add missing users to database instance
     for user in missing_db_users:
         await user_service.insert_db_user(

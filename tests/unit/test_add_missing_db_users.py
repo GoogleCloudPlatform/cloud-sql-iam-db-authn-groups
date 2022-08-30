@@ -35,11 +35,13 @@ async def test_no_missing_users():
     """
     user_service = FakeUserService()
     iam_future = asyncio.Future()
-    iam_future.set_result(["user1@test.com", "user2@test.com"])
+    iam_future.set_result(
+        ["user1@test.com", "user2@test.com", "sa@test.iam.gserviceaccount.com"]
+    )
     mysql_users = asyncio.Future()
-    mysql_users.set_result(["user1", "user2"])
+    mysql_users.set_result(["user1", "user2", "sa"])
     postgres_users = asyncio.Future()
-    postgres_users.set_result(["user1@test.com", "user2@test.com"])
+    postgres_users.set_result(["user1@test.com", "user2@test.com", "sa@test.iam"])
 
     missing_mysql_users = await add_missing_db_users(
         user_service,
@@ -60,13 +62,20 @@ async def test_no_missing_users():
 
 
 @pytest.mark.asyncio
-async def test_missing__users():
+async def test_missing_users():
     """Test where there are IAM users missing corresponding database user.
     Should return set of the emails of IAM users missing database user.
     """
     user_service = FakeUserService()
     iam_future = asyncio.Future()
-    iam_future.set_result(["user1@test.com", "user2@test.com", "user3@test.com"])
+    iam_future.set_result(
+        [
+            "user1@test.com",
+            "user2@test.com",
+            "user3@test.com",
+            "sa@test.iam.gserviceaccount.com",
+        ]
+    )
     postgres_users = asyncio.Future()
     postgres_users.set_result(["user1@test.com"])
     mysql_users = asyncio.Future()
@@ -79,7 +88,9 @@ async def test_missing__users():
         "group:region:instance",
         DatabaseVersion.POSTGRES_13,
     )
-    assert missing_iam_users == set(["user2@test.com", "user3@test.com"])
+    assert missing_iam_users == set(
+        ["user2@test.com", "user3@test.com", "sa@test.iam.gserviceaccount.com"]
+    )
 
     missing_iam_users = await add_missing_db_users(
         user_service,
@@ -88,7 +99,9 @@ async def test_missing__users():
         "group:region:instance",
         DatabaseVersion.MYSQL_8_0,
     )
-    assert missing_iam_users == set(["user2@test.com", "user3@test.com"])
+    assert missing_iam_users == set(
+        ["user2@test.com", "user3@test.com", "sa@test.iam.gserviceaccount.com"]
+    )
 
 
 @pytest.mark.asyncio
