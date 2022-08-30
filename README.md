@@ -224,12 +224,22 @@ An example JSON payload:
 {
     "iam_groups": ["group@test.com", "group2@test.com"],
     "sql_instances": ["project:region:instance"],
+    "group_roles": {
+        "group@test.com": "engineering",
+        "group2@test.com": "accounting"
+    },
     "private_ip": false
 }
 ```
 Where:
 - **iam_groups**: List of all IAM Groups to manage IAM database users of.
 - **sql_instances**: List of all Cloud SQL instances to configure.
+- **group_roles**(optional): Dictionary of IAM group emails as keys and group database
+    role names as values. The group database role name is the database role
+    that will be granted/revoked within GroupSync to each member of the
+    corresponding IAM group. Group role names default to the IAM group email
+    without the domain (everything before the @, i.e "iam-group@test.com"
+    would have a default group role name of "iam-group".
 - **private_ip** (optional): Boolean flag for private or public IP addresses.
 
 **Note:** These are placeholder values and should be replaced with proper IAM groups and Cloud SQL instance connection names.

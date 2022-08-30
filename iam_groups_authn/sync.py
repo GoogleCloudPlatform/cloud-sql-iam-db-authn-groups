@@ -20,6 +20,7 @@ from google.cloud.sql.connector.instance_connection_manager import IPTypes
 import json
 from aiohttp import ClientSession
 from enum import Enum
+from typing import Any, Optional
 import logging
 from iam_groups_authn.sql_admin import (
     get_instance_users,
@@ -39,7 +40,9 @@ from iam_groups_authn.postgres import (
 )
 
 
-async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
+async def groups_sync(
+    iam_groups, sql_instances, credentials, group_roles, private_ip=False
+):
     """GroupSync method to sync IAM groups with Cloud SQL instances.
 
     Args:
@@ -48,6 +51,18 @@ async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
         sql_instances: List of instance connection names for Cloud SQL instances to sync.
             (e.g. ["<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>"])
         credentials: OAuth2 credentials.
+        group_roles:(optional) Dict of IAM group emails as keys and group database
+            role names as values. The group database role name is the database role
+            that will be granted/revoked within GroupSync to each member of the
+            corresponding IAM group. Group role names default to IAM group email
+            without the domain (everything before the @, i.e "iam-group@test.com"
+            would have group role name of "iam-group".
+            (e.g.
+                {
+                    "iam-group@test.com": "engineering",
+                    "iam-group2@test.com": "accounting"
+                }
+            )
         private_ip:(optional) Boolean flag for connecting to Cloud SQL databases with
             Private or Public IPs. (defaults to False for Public IP)
     """
@@ -55,135 +70,158 @@ async def groups_sync(iam_groups, sql_instances, credentials, private_ip=False):
     ip_type = IPTypes.PRIVATE if private_ip else IPTypes.PUBLIC
 
     # create aiohttp client session for async API calls
-    client_session = ClientSession(headers={"Content-Type": "application/json"})
+    async with ClientSession(
+        headers={"Content-Type": "application/json"}
+    ) as client_session:
 
-    # create UserService object for API calls
-    user_service = UserService(client_session, credentials)
+        # create UserService object for API calls
+        user_service = UserService(client_session, credentials)
 
-    # keep track of IAM group and database instance tasks
-    group_tasks = {}
-    instance_tasks = {}
+        # keep track of IAM group and database instance tasks
+        group_tasks = {}
+        instance_tasks = {}
 
-    # loop iam_groups and sql_instances creating async tasks
-    for group in iam_groups:
-        group_task = asyncio.create_task(get_iam_users(user_service, group))
-        group_tasks[group] = group_task
+        # loop iam_groups and sql_instances creating async tasks
+        for group in iam_groups:
+            group_task = asyncio.create_task(get_iam_users(user_service, group))
+            group_tasks[group] = group_task
 
-    for instance in sql_instances:
-        instance_task = asyncio.create_task(get_instance_users(user_service, instance))
-        database_version_task = asyncio.create_task(
-            user_service.get_database_version(
-                InstanceConnectionName(*instance.split(":"))
+        for instance in sql_instances:
+            users_task = asyncio.create_task(get_instance_users(user_service, instance))
+            database_version_task = asyncio.create_task(
+                user_service.get_database_version(
+                    InstanceConnectionName(*instance.split(":"))
+                )
+            )
+            instance_tasks[instance] = (users_task, database_version_task)
+
+        # hold all pairings of group-to-instance async tasks
+        sync_tasks = []
+        # create pairings of iam groups and instances
+        for group in iam_groups:
+            for instance in sql_instances:
+                sync_task = asyncio.create_task(
+                    sync_group(
+                        group,
+                        instance,
+                        group_tasks[group],
+                        instance_tasks[instance],
+                        group_roles,
+                        user_service,
+                        credentials,
+                        ip_type,
+                    )
+                )
+                sync_tasks.append(sync_task)
+
+            # run all the mapped syncs
+            results = await asyncio.gather(*sync_tasks, return_exceptions=True)
+
+            # if one of the syncs fails, fail entire run
+            for result in results:
+                if issubclass(type(result), Exception):
+                    raise result
+
+
+async def sync_group(
+    group,
+    instance,
+    group_task,
+    instance_tasks,
+    group_roles,
+    user_service,
+    credentials,
+    ip_type,
+):
+    """
+    Sync the IAM members of a single group to a single Cloud SQL instance.
+    """
+    try:
+        database_version = await instance_tasks[1]
+        # verify that group role for database won't exceed character limit
+        verify_group_role_length(group, group_roles, database_version)
+        # add missing IAM group members to database
+        add_users_task = asyncio.create_task(
+            add_missing_db_users(
+                user_service,
+                group_task,
+                instance_tasks[0],
+                instance,
+                database_version,
             )
         )
-        instance_tasks[instance] = (instance_task, database_version_task)
 
-    # create pairings of iam groups and instances
-    for group in iam_groups:
-        for instance in sql_instances:
-
-            # get database version of instance and check if supported
-            database_version = await instance_tasks[instance][1]
-            try:
-                database_version = DatabaseVersion(database_version)
-            except ValueError as e:
-                raise ValueError(
-                    f"Unsupported database version for instance `{instance}`. Current supported versions are: {list(DatabaseVersion.__members__.keys())}"
-                ) from e
-
-            # add missing IAM group members to database
-            add_users_task = asyncio.create_task(
-                add_missing_db_users(
-                    user_service,
-                    group_tasks[group],
-                    instance_tasks[instance][0],
-                    instance,
-                    database_version,
-                )
+        # initialize database connection pool
+        if database_version.is_mysql():
+            db = init_mysql_connection_engine(instance, credentials, ip_type)
+            role_service = MysqlRoleService(db)
+        elif database_version.is_postgres():
+            db = init_postgres_connection_engine(instance, credentials, ip_type)
+            role_service = PostgresRoleService(db)
+        else:
+            raise UnsupportedDatabaseError(
+                f"Unsupported database version for instance `{instance}`. Current supported versions are: {list(DatabaseVersion.__members__.keys())}"
             )
+        logging.debug(
+            f"[{instance}][{group}] Initialized a {database_version.value} connection pool."
+        )
 
-            # initialize database connection pool
-            if database_version.is_mysql():
-                db = init_mysql_connection_engine(instance, credentials, ip_type)
-                role_service = MysqlRoleService(db)
-            else:
-                db = init_postgres_connection_engine(instance, credentials, ip_type)
-                role_service = PostgresRoleService(db)
-            logging.debug(
-                "[%s][%s] Initialized a %s connection pool."
-                % (instance, group, database_version.value)
-            )
+        # verify role for IAM group exists on database, create if does not exist
+        role = group_roles.get(group, mysql_username(group))
+        verify_role_task = asyncio.create_task(role_service.create_group_role(role))
 
-            # verify role for IAM group exists on database, create if does not exist
-            role = mysql_username(group)
-            verify_role_task = asyncio.create_task(role_service.create_group_role(role))
+        # await dependent tasks
+        added_users, _ = await asyncio.gather(add_users_task, verify_role_task)
 
-            # get database users who have group role
-            users_with_roles_task = asyncio.create_task(
-                get_users_with_roles(role_service, role)
-            )
+        # log IAM users added as database users
+        logging.debug(
+            f"[{instance}][{group}] Users added to database: {list(added_users)}."
+        )
 
-            # await dependent tasks
-            results = await asyncio.gather(
-                add_users_task, verify_role_task, return_exceptions=True
-            )
-            # raise exception if found
-            for result in results:
-                if issubclass(type(result), Exception):
-                    raise result
+        # get database users who have group role
+        users_with_roles_task = asyncio.create_task(
+            get_users_with_roles(role_service, role)
+        )
 
-            # log IAM users added as database users
-            added_users = results[0]
-            logging.debug(
-                "[%s][%s] Users added to database: %s."
-                % (instance, group, list(added_users))
+        # revoke group role from users no longer in IAM group
+        revoke_role_task = asyncio.create_task(
+            revoke_iam_group_role(
+                role_service,
+                role,
+                users_with_roles_task,
+                group_task,
+                database_version,
             )
+        )
 
-            # revoke group role from users no longer in IAM group
-            revoke_role_task = asyncio.create_task(
-                revoke_iam_group_role(
-                    role_service,
-                    role,
-                    users_with_roles_task,
-                    group_tasks[group],
-                    database_version,
-                )
+        # grant group role to IAM users who are missing it on database
+        grant_role_task = asyncio.create_task(
+            grant_iam_group_role(
+                role_service,
+                role,
+                users_with_roles_task,
+                group_task,
+                database_version,
             )
+        )
+        revoked_users, granted_users = await asyncio.gather(
+            revoke_role_task, grant_role_task
+        )
 
-            # grant group role to IAM users who are missing it on database
-            grant_role_task = asyncio.create_task(
-                grant_iam_group_role(
-                    role_service,
-                    role,
-                    users_with_roles_task,
-                    group_tasks[group],
-                    database_version,
-                )
-            )
-            results = await asyncio.gather(
-                revoke_role_task, grant_role_task, return_exceptions=True
-            )
-            # raise exception if found
-            for result in results:
-                if issubclass(type(result), Exception):
-                    raise result
+        # log sync info
+        logging.info(
+            f"[{instance}][{group}] Sync successful: {len(revoked_users)} users were revoked group role, {len(granted_users)} users were granted group role."
+        )
+        logging.debug(f"[{instance}][{group}] Users revoked role: {revoked_users}.")
+        logging.debug(f"[{instance}][{group}] Users granted role: {granted_users}.")
+    # log if sync failed for instance and group pair
+    except Exception as e:
+        logging.info(f"[{instance}][{group}] Sync failed with error message: {str(e)} ")
+        raise
 
-            # log sync info
-            revoked_users, granted_users = results
-            logging.info(
-                "[%s][%s] Sync successful: %s users were revoked group role, %s users were granted group role."
-                % (instance, group, len(revoked_users), len(granted_users))
-            )
-            logging.debug(
-                "[%s][%s] Users revoked role: %s." % (instance, group, revoked_users)
-            )
-            logging.debug(
-                "[%s][%s] Users granted role: %s." % (instance, group, granted_users)
-            )
 
-    # close aiohttp client session for graceful exit
-    if not client_session.closed:
-        await client_session.close()
+class UnsupportedDatabaseError(Exception):
+    pass
 
 
 class UserService:
@@ -313,10 +351,13 @@ class UserService:
             results = json.loads(await resp.text())
             database_version = results.get("databaseVersion")
             logging.debug(
-                "[%s:%s:%s] Database version found: %s"
-                % (project, region, instance, database_version)
+                f"[{project}:{region}:{instance}] Database version found: {database_version}"
             )
-            return database_version
+            return DatabaseVersion(database_version)
+        except ValueError as e:
+            raise ValueError(
+                f"Unsupported database version for instance `{instance}`. Current supported versions are: {list(DatabaseVersion.__members__.keys())}"
+            ) from e
         except Exception as e:
             raise Exception(
                 f"Error: Failed to get the database version for `{instance_connection_name}`. Verify instance connection name and instance details."
@@ -448,3 +489,44 @@ async def grant_iam_group_role(
     await role_service.grant_group_role(role, users_to_grant)
 
     return users_to_grant
+
+
+class GroupRoleMaxLengthError(Exception):
+    """Error raised if group role exceeds database character limit"""
+
+    def __init__(self, *args: Any) -> None:
+        super(GroupRoleMaxLengthError, self).__init__(self, *args)
+
+
+def verify_group_role_length(
+    iam_group: str, group_roles: Optional[dict], database_version: DatabaseVersion
+) -> None:
+    """Verify that group role names created or used by GroupSync do not
+    exceed the character limit for the database.
+    iam_group: Email for IAM group to sync.
+        e.g. "iam-group@test.com"
+    group_roles:(optional) Dict of IAM group emails as keys and group database
+        role names as values. The group database role name is the database role
+        that will be granted/revoked within GroupSync to each member of the
+        corresponding IAM group. Group role names default to IAM group email
+        without the domain (everything before the @, i.e "iam-group@test.com"
+        would have group role name of "iam-group".
+        (e.g.
+            {
+                "iam-group@test.com": "engineering",
+                "iam-group2@test.com": "accounting"
+            }
+        )
+    database_version: Cloud SQL instance database version.
+    """
+    # character limit for username/role for MySQL is 32, Postgres is 63
+    char_limit = 32 if database_version.is_mysql() else 63
+    # character count for group role
+    char_role = len(group_roles.get(iam_group, mysql_username(iam_group)))
+    if char_role > char_limit:
+        raise GroupRoleMaxLengthError(
+            f"Group database role for IAM group `{iam_group}` "
+            f"would exceed character limit of {char_limit}, please specify"
+            " request parameter `group_roles` to map group role to shorter"
+            " length."
+        )
