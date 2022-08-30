@@ -155,9 +155,13 @@ async def sync_group(
         if database_version.is_mysql():
             db = init_mysql_connection_engine(instance, credentials, ip_type)
             role_service = MysqlRoleService(db)
-        else:
+        elif database_version.is_postgres():
             db = init_postgres_connection_engine(instance, credentials, ip_type)
             role_service = PostgresRoleService(db)
+        else:
+            raise UnsupportedDatabaseError(
+                f"Unsupported database version for instance `{instance}`. Current supported versions are: {list(DatabaseVersion.__members__.keys())}"
+            )
         logging.debug(
             f"[{instance}][{group}] Initialized a {database_version.value} connection pool."
         )
@@ -166,17 +170,17 @@ async def sync_group(
         role = group_roles.get(group, mysql_username(group))
         verify_role_task = asyncio.create_task(role_service.create_group_role(role))
 
-        # get database users who have group role
-        users_with_roles_task = asyncio.create_task(
-            get_users_with_roles(role_service, role)
-        )
-
         # await dependent tasks
         added_users, _ = await asyncio.gather(add_users_task, verify_role_task)
 
         # log IAM users added as database users
         logging.debug(
             f"[{instance}][{group}] Users added to database: {list(added_users)}."
+        )
+
+        # get database users who have group role
+        users_with_roles_task = asyncio.create_task(
+            get_users_with_roles(role_service, role)
         )
 
         # revoke group role from users no longer in IAM group
@@ -214,6 +218,10 @@ async def sync_group(
     except Exception as e:
         logging.info(f"[{instance}][{group}] Sync failed with error message: {str(e)} ")
         raise
+
+
+class UnsupportedDatabaseError(Exception):
+    pass
 
 
 class UserService:
