@@ -317,6 +317,7 @@ class UserService:
         url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project}/instances/{instance}/users"
         # if service account, add service account IAM database user
         if user_email.endswith(".gserviceaccount.com"):
+            # the Cloud SQL Admin API doesn't format Postgres usernames, but does format MySQL usernames
             if database_type.is_mysql():
                 user = {
                     "name": user_email,
