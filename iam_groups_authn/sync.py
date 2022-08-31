@@ -37,6 +37,7 @@ from iam_groups_authn.mysql import (
 from iam_groups_authn.postgres import (
     init_postgres_connection_engine,
     PostgresRoleService,
+    postgres_username,
 )
 
 
@@ -298,7 +299,7 @@ class UserService:
                 f"Error: Failed to get the database users for instance `{instance_connection_name}`. Verify instance connection name and instance details."
             ) from e
 
-    async def insert_db_user(self, user_email, instance_connection_name):
+    async def insert_db_user(self, user_email, instance_connection_name, database_type):
         """Create DB user from IAM user.
 
         Given an IAM user's email, insert the IAM user as a DB user for Cloud SQL instance.
@@ -308,12 +309,27 @@ class UserService:
             instance_connection_name: InstanceConnectionName namedTuple.
                 (e.g. InstanceConnectionName(project='my-project', region='my-region',
                 instance='my-instance'))
+            database_type: Cloud SQL database version.
         """
         # build request to SQL Admin API
         project = instance_connection_name.project
         instance = instance_connection_name.instance
         url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project}/instances/{instance}/users"
-        user = {"name": user_email, "type": "CLOUD_IAM_USER"}
+        # if service account, add service account IAM database user
+        if user_email.endswith(".gserviceaccount.com"):
+            # the Cloud SQL Admin API doesn't format Postgres usernames, but does format MySQL usernames
+            if database_type.is_mysql():
+                user = {
+                    "name": user_email,
+                    "type": "CLOUD_IAM_SERVICE_ACCOUNT",
+                }
+            else:
+                user = {
+                    "name": user_email.removesuffix(".gserviceaccount.com"),
+                    "type": "CLOUD_IAM_SERVICE_ACCOUNT",
+                }
+        else:
+            user = {"name": user_email, "type": "CLOUD_IAM_USER"}
 
         try:
             # call the SQL Admin API
@@ -483,6 +499,9 @@ async def grant_iam_group_role(
     if database_type.is_mysql():
         # truncate mysql_usernames
         iam_users = [mysql_username(user) for user in iam_users]
+    elif database_type.is_postgres():
+        # truncate postgres service accounts
+        iam_users = [postgres_username(user) for user in iam_users]
 
     # find DB users who are part of IAM group that need role granted to them
     users_to_grant = [user for user in iam_users if user not in users_with_roles]
