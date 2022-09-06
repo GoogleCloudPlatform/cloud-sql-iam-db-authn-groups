@@ -21,7 +21,7 @@ from aiohttp import ClientSession
 from helpers import delete_database_user, delete_iam_member, add_iam_member
 from iam_groups_authn.iam_admin import get_iam_users
 from iam_groups_authn.mysql import mysql_username
-from iam_groups_authn.postgres import init_postgres_connection_engine
+from iam_groups_authn.postgres import init_postgres_connection_engine, postgres_username
 from iam_groups_authn.sql_admin import get_instance_users
 from iam_groups_authn.sync import groups_sync, UserService
 import time
@@ -30,6 +30,7 @@ import time
 sql_instance = os.environ["POSTGRES_INSTANCE"]
 iam_groups = [os.environ["IAM_GROUPS"]]
 test_user = os.environ["TEST_USER"]
+sa_user = os.environ["SA_USER"]
 
 scopes = [
     "https://www.googleapis.com/auth/admin.directory.group.member",
@@ -74,8 +75,14 @@ def setup_and_teardown():
     try:
         # cleanup user from database
         delete_database_user(sql_instance, test_user, credentials)
+        # cleanup service account from database
+        delete_database_user(sql_instance, postgres_username(sa_user), credentials)
         # re-add member to IAM group
         add_iam_member(iam_groups[0], test_user, credentials)
+        # re-add service account to IAM group
+        add_iam_member(iam_groups[0], sa_user, credentials)
+        # wait 30 seconds, adding IAM member is slow
+        time.sleep(30)
     except Exception:
         print("------------------------Cleanup Failed!------------------------")
 
@@ -94,34 +101,38 @@ async def test_service_postgres(credentials):
         - Verifies test user no longer has group role
     """
 
-    # remove database user if they exist
+    # remove database users if they exist
     try:
         delete_database_user(sql_instance, test_user, credentials)
+        delete_database_user(sql_instance, postgres_username(sa_user), credentials)
     except Exception:
-        print("Database user must already have been deleted!")
+        print("Database users must already have been deleted!")
 
     # create aiohttp client session for async API calls
     client_session = ClientSession(headers={"Content-Type": "application/json"})
 
-    # check that test_user is not a database user
+    # check that users are not a database user
     user_service = UserService(client_session, credentials)
     db_users = await get_instance_users(user_service, sql_instance)
     assert test_user not in db_users
+    assert postgres_username(sa_user) not in db_users
 
-    # make sure test_user is member of IAM group
+    # make sure users are members of IAM group
     try:
         add_iam_member(iam_groups[0], test_user, credentials)
-        # wait 5 seconds, adding IAM member is slow
-        time.sleep(5)
+        add_iam_member(iam_groups[0], sa_user, credentials)
+        # wait 30 seconds, adding IAM member is slow
+        time.sleep(30)
     except Exception:
         print("Member must already belong to IAM Group.")
 
     # run groups sync
-    await groups_sync(iam_groups, [sql_instance], credentials, False)
+    await groups_sync(iam_groups, [sql_instance], credentials, dict(), False)
 
-    # check that test_user has been created as database user
+    # check that users has been created as database users
     db_users = await get_instance_users(user_service, sql_instance)
     assert test_user in db_users
+    assert postgres_username(sa_user) in db_users
 
     # create database connection to instance
     pool = init_postgres_connection_engine(sql_instance, credentials)
@@ -131,21 +142,23 @@ async def test_service_postgres(credentials):
         users_with_role = check_role_postgres(pool, mysql_username(iam_group))
         iam_members = await get_iam_users(user_service, iam_group)
         for member in iam_members:
-            assert member in users_with_role
+            assert postgres_username(member) in users_with_role
 
-    # remove test_user from IAM group
+    # remove users from IAM group
     delete_iam_member(iam_groups[0], test_user, credentials)
+    delete_iam_member(iam_groups[0], sa_user, credentials)
 
-    # wait 5 seconds, deleting IAM member is slow
-    time.sleep(5)
+    # wait 30 seconds, deleting IAM member is slow
+    time.sleep(30)
 
     # run groups sync
-    await groups_sync(iam_groups, [sql_instance], credentials, False)
+    await groups_sync(iam_groups, [sql_instance], credentials, dict(), False)
 
     # verify test_user no longer has group role
     users_with_role = check_role_postgres(pool, mysql_username(iam_groups[0]))
     assert test_user not in users_with_role
+    assert postgres_username(sa_user) not in users_with_role
 
     # close aiohttp client session for graceful exit
-    if client_session.closed:
+    if not client_session.closed:
         await client_session.close()

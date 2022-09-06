@@ -155,7 +155,7 @@ def init_mysql_connection_engine(
         user=service_account_email,
         password=str(creds.token),
         db="",
-        enable_iam_auth=True,
+        enable_iam_auth=False,
     )
 
     # create connection pool

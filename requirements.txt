@@ -1,9 +1,9 @@
 quart==0.17.0
 hypercorn==0.11.2
 SQLAlchemy==1.4.22
-google-auth==2.0.0
+google-auth==2.11.0
 PyMySQL==1.0.2
 pg8000==1.22.0
 cloud-sql-python-connector==0.4.1
-google-cloud-logging==2.6.0
-aiohttp==3.8.0
+google-cloud-logging==3.2.2
+aiohttp==3.8.1

@@ -7,7 +7,7 @@ GroupSync is a self-deployed service that provides support for managing [Cloud S
 Below outlines the steps to automate the majority of a GroupSync deployment, allowing for faster and more scalable deployments.
 This deployment uses a script to build the appropriate GroupSync resources:
 - Service Account with required permissions
-- Serverless VPC Access Connector
+- Serverless VPC Access Connector (if using private IP Cloud SQL connections)
 - Cloud Run service
 - Cloud Scheduler Job
 
@@ -41,8 +41,10 @@ Scheduler Job between the desired IAM Groups and Cloud SQL Instances.
 ```
 
 ### Set Required Variables within Deployment Script
-The script used to facilitate the deployment of GroupSync is
-[build-and-deploy-private-ip.sh](build-and-deploy-private-ip.sh).
+The script used to facilitate the deployment of GroupSync is either
+[build-and-deploy.sh](build-and-deploy.sh) for Public IP connections or
+[build-and-deploy-private-ip.sh](build-and-deploy-private-ip.sh) for
+Private IP connections.
 
 Edit the following variables at the top of the script with the
 proper values for your deployment.
@@ -53,18 +55,25 @@ export REGION="" # Google Cloud region to deploy GroupSync in
 export SERVICE_ACCOUNT_NAME="" # name of service account to create and use with GroupSync
 export SERVICE_ACCOUNT_EMAIL="$SERVICE_ACCOUNT_NAME@$PROJECT_ID.iam.gserviceaccount.com" # email of service account to deploy Cloud Run with
 
+export PATH_TO_JSON="" # relative file path to JSON file containing instance-to-group mappings for Cloud Scheduler
+export SCHEDULE="*/10 * * * *" # schedule how often GroupSync Cloud Scheduler is called (defaults to 10 mins)
+
+# ONLY FOR PRIVATE IP (build-and-deploy-private-ip.sh)
 export HOST_PROJECT_ID="" # project ID of Shared VPC host project (optional)
 export CONNECTOR_NAME="" # name to be given to Serverless VPC Access Connector
 export SUBNET="" # the name of an unused /28 subnet for Serverless VPC Access Connector
-
-export PATH_TO_JSON="" # relative file path to JSON file containing instance-to-group mappings for Cloud Scheduler
-export SCHEDULE="*/10 * * * *" # schedule how often GroupSync Cloud Scheduler is called (defaults to 10 mins)
 ```
 
 ### Run Script
-Now the deployment script can be run by executing the following command:
+Now the deployment script can be run by executing one of the following commands:
 
 ```bash
+# public IP
+./scripts/build-and-deploy.sh
+```
+
+```bash
+# private IP
 ./scripts/build-and-deploy-private-ip.sh
 ```
 
