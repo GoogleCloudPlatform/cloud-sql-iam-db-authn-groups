@@ -1,6 +1,6 @@
 quart==0.17.0
 hypercorn==0.11.2
-SQLAlchemy==1.4.22
+SQLAlchemy==2.0.1
 google-auth==2.11.0
 PyMySQL==1.0.2
 pg8000==1.22.0
