@@ -4,6 +4,6 @@ SQLAlchemy==1.4.22
 google-auth==2.11.0
 PyMySQL==1.0.2
 pg8000==1.22.0
-cloud-sql-python-connector==0.4.1
+cloud-sql-python-connector==0.9.3
 google-cloud-logging==3.2.2
 aiohttp==3.8.1
