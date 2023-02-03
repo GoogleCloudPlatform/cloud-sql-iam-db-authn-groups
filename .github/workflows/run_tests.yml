@@ -34,7 +34,7 @@ jobs:
           python-version: 3.9
       
       - name: Install Test Dependencies
-        uses: py-actions/py-dependency-install@v2
+        uses: py-actions/py-dependency-install@v4
         with:
           path: "requirements-test.txt"
       
