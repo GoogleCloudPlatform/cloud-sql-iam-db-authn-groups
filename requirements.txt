@@ -6,4 +6,4 @@ PyMySQL==1.0.2
 pg8000==1.29.4
 cloud-sql-python-connector==0.4.1
 google-cloud-logging==3.2.2
-aiohttp==3.8.3
+aiohttp==3.8.4
