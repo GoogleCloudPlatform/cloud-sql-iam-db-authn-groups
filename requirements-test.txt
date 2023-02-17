@@ -2,7 +2,7 @@ pytest==7.2.1
 pytest-asyncio==0.20.3
 quart==0.17.0
 SQLAlchemy==1.4.46
-google-auth==2.16.0
+google-auth==2.16.1
 PyMySQL==1.0.2
 pg8000==1.29.4
 google-api-python-client==2.58.0
