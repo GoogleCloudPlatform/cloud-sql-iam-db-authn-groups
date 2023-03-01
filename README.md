@@ -1,7 +1,7 @@
 # GroupSync: Cloud SQL IAM Database Authentication for Groups
 **Note:** This project is experimental and is not an officially supported Google product.
 
-GroupSync is a self-deployed service that provides support for managing [Cloud SQL IAM Database Authentication](https://cloud.google.com/sql/docs/mysql/authentication) for groups. GroupSync leverages [Cloud Run](https://cloud.google.com/run), [Cloud Scheduler](https://cloud.google.com/scheduler), and the [Cloud SQL Python Connector](https://github.com/googlecloudplatform/cloud-sql-python-connector) to consistently update and sync Cloud SQL instances based on IAM groups. It will create missing database IAM users, GRANT roles to database IAM users based on their IAM groups, and REVOKE roles from database IAM users no longer in IAM groups.
+GroupSync is a self-deployed example app that provides support for managing [Cloud SQL IAM Database Authentication](https://cloud.google.com/sql/docs/mysql/authentication) for groups. GroupSync leverages [Cloud Run](https://cloud.google.com/run), [Cloud Scheduler](https://cloud.google.com/scheduler), and the [Cloud SQL Python Connector](https://github.com/googlecloudplatform/cloud-sql-python-connector) to consistently update and sync Cloud SQL instances based on IAM groups. It will create missing database IAM users, GRANT roles to database IAM users based on their IAM groups, and REVOKE roles from database IAM users no longer in IAM groups.
 
 ## Supported Databases
 Currently only the following databases are supported:
@@ -9,7 +9,7 @@ Currently only the following databases are supported:
 - **PostgreSQL 14, 13, 12, 11, 10, 9.6**
 
 ## Overview
-The GroupSync service at an overview is made of Cloud Scheduler Job(s) and Cloud Run instance(s).
+The GroupSync example app at an overview is made of Cloud Scheduler Job(s) and Cloud Run instance(s).
 
 The Cloud Scheduler Job(s) are configured to run on the interval of your choosing (every 10 mins, 1 hour, daily etc.) When ran, the Cloud Scheduler calls a GroupSync Cloud Run service, passing in the configured request body from the scheduler, which contains parameters that tell the service which IAM groups and which Cloud SQL instances to sync and manage.
 
@@ -20,10 +20,10 @@ The Cloud Run service calls the required Google APIs to get a snapshot of the cu
 <p align="center"><img src="images/service_overview.png" width="700"></p>
 
 ## Deployment
-There are a few initial setups steps to get the GroupSync service ready and grant it the permissions needed in order to successfully operate. However, after this setup is complete, minimal configuration is needed in the future.
+There are a few initial setups steps to get the GroupSync example app ready and grant it the permissions needed in order to successfully operate. However, after this setup is complete, minimal configuration is needed in the future.
 
 ### Installation
-To run this service successfully, please clone this repository to an environment that thas the Google Cloud SDK installed and initialized. [(Install and initialize the Cloud SDK)](https://cloud.google.com/sdk/docs/install)
+To run this example app successfully, please clone this repository to an environment that thas the Google Cloud SDK installed and initialized. [(Install and initialize the Cloud SDK)](https://cloud.google.com/sdk/docs/install)
 
 ```
 git clone https://github.com/GoogleCloudPlatform/cloud-sql-iam-db-authn-groups
