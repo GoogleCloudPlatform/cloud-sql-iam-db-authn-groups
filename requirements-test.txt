@@ -1,5 +1,5 @@
 pytest==7.2.1
-pytest-asyncio==0.20.3
+pytest-asyncio==0.21.1
 quart==0.17.0
 SQLAlchemy==1.4.46
 google-auth==2.16.1
