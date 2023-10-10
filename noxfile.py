@@ -28,6 +28,6 @@ def lint(session):
     Returns a failure if the linters find linting errors or sufficiently
     serious code quality issues.
     """
-    session.install("-r", "requirements-test.txt")
+    session.install("-r", "requirements-dev.txt")
     session.install("-r", "requirements.txt")
     session.run("black", "--check", *BLACK_PATHS)

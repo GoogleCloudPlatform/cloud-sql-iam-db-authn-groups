@@ -1,0 +1,92 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '!./VERSION'
+
+  pull_request:
+    paths:
+      - '!./VERSION'
+
+env:
+  IMAGE-NAME: 'infrastructure/db-auth-groups'
+  GCP_PROJECT_ID: '697755496304'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    strategy:
+      max-parallel: 4
+      matrix:
+        python-version: [3.11]
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: auth
+        name: 'Authenticate to Honest Freight GCP'
+        uses: 'google-github-actions/auth@v1.1.1'
+        with:
+          credentials_json: '${{ secrets.HF_GH_ACTION_CRED_KEY }}'
+      
+      - id: 'get-secrets'
+        uses: 'google-github-actions/get-secretmanager-secrets@v1.0.1'
+        with:
+          secrets: |-
+            github-token:${{ env.GCP_PROJECT_ID }}/GITHUB-ORG-GITHUBSA-TOKEN
+            octopus-api-key:${{ env.GCP_PROJECT_ID }}/GITHUB-ORG-OCTOPUS-API-KEY
+            slack-webhook:${{ env.GCP_PROJECT_ID }}/BUILD_SLACK_URL
+
+      - name: Build and Test
+        id: build-test-push
+        uses: truenorthfleet/python-build-test-push@main
+        with:
+          source-directory: .
+          database: false
+          coverage-command: 'coverage run ./manage.py test -v 3'
+          python-version: ${{ matrix.python-version }}
+          GITHUB-TOKEN: ${{ steps.get-secrets.outputs.github-token }}
+          GITHUB-USER: ${{ vars.SA_USERNAME }}
+          GITHUB-EMAIL: ${{ vars.SA_EMAIL }}
+          GCP-KEY: ${{ secrets.HF_GH_ACTION_CRED_KEY }}
+          REGISTRY: ${{ vars.HF_ARTIFACT_REGISTRY }}
+          PROJECT-ID: ${{ vars.HF_PROJECT_ID }}
+          IMAGE-NAME: ${{ env.IMAGE-NAME }}
+#          SONAR-TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Tag the release
+        if: github.ref_name == 'main'
+        uses: mathieudutour/github-tag-action@v6.1
+        with:
+          github_token: ${{ steps.get-secrets.outputs.github-token }}
+          custom_tag: ${{ steps.build-test-push.outputs.release-name }}
+          tag_prefix: ''
+
+      - name: Deploy via Octopus
+        uses: truenorthfleet/octopus-release-deploy@main
+        with:
+          OCTOPUS-API-KEY: ${{ steps.get-secrets.outputs.octopus-api-key }}
+          project: 'Deploy Monolith - Backend'
+          server: ${{ vars.OCTOPUS_SERVER }}
+          space: ${{ vars.OCTOPUS_SPACE }}
+          release-number: ${{ steps.build-test-push.outputs.release-name }}
+
+      - name: Send Notification
+        uses: 8398a7/action-slack@v3.14.0
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,eventName,ref,workflow,pullRequest
+        env:
+          SLACK_WEBHOOK_URL: ${{ steps.get-secrets.outputs.slack-webhook }}
+        if: always()
