@@ -27,7 +27,6 @@ test_data = [
     ("POSTGRES_11", "POSTGRES_11"),
     ("POSTGRES_10", "POSTGRES_10"),
     ("POSTGRES_9_6", "POSTGRES_9_6"),
-    ("POSTGRES_9_6", "POSTGRES_9_6"),
 ]
 
 @pytest.mark.parametrize("database_version,expected", test_data)
