@@ -87,3 +87,13 @@ class RoleService(ABC):
     @abstractmethod
     def revoke_group_role(self, role, users):
         pass
+
+
+def strip_minor_version(database_version: str) -> str:
+    """
+    Helper method for stripping minor version suffix from database version.
+    """
+    for version in DatabaseVersion.__members__.keys():
+        if database_version.startswith(version):
+            database_version = version
+    return database_version
