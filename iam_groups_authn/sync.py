@@ -28,7 +28,7 @@ from iam_groups_authn.sql_admin import (
     InstanceConnectionName,
 )
 from iam_groups_authn.iam_admin import get_iam_users
-from iam_groups_authn.utils import DatabaseVersion
+from iam_groups_authn.utils import DatabaseVersion, strip_minor_version
 from iam_groups_authn.mysql import (
     init_mysql_connection_engine,
     MysqlRoleService,
@@ -74,7 +74,6 @@ async def groups_sync(
     async with ClientSession(
         headers={"Content-Type": "application/json"}
     ) as client_session:
-
         # create UserService object for API calls
         user_service = UserService(client_session, credentials)
 
@@ -369,6 +368,8 @@ class UserService:
             logging.debug(
                 f"[{project}:{region}:{instance}] Database version found: {database_version}"
             )
+            # if major version is supported, we support minor version
+            database_version = strip_minor_version(database_version)
             return DatabaseVersion(database_version)
         except ValueError as e:
             raise ValueError(
