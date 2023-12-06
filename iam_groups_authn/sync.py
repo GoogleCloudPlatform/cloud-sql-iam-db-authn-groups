@@ -74,7 +74,6 @@ async def groups_sync(
     async with ClientSession(
         headers={"Content-Type": "application/json"}
     ) as client_session:
-
         # create UserService object for API calls
         user_service = UserService(client_session, credentials)
 
@@ -369,6 +368,10 @@ class UserService:
             logging.debug(
                 f"[{project}:{region}:{instance}] Database version found: {database_version}"
             )
+            # if major version is supported, we support minor version
+            for version in DatabaseVersion.__members__.keys():
+                if database_version.startswith(version):
+                    database_version = version
             return DatabaseVersion(database_version)
         except ValueError as e:
             raise ValueError(
