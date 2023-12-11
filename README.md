@@ -1,4 +1,16 @@
+# :warning: NOTE
+
+Cloud SQL for MySQL 8.0+ has support for [Group IAM Authentication][group-iam-auth]. 
+We recommend all MySQL 8.0+ customers use this feature instead of the workaround here.
+
+Cloud SQL for Postgres will have support for Group IAM Authentication soon.
+
+See the [public docs][group-iam-auth] for more info.
+
+[group-iam-auth]: https://cloud.google.com/sql/docs/mysql/iam-authentication#iam-group-auth
+
 # GroupSync: Cloud SQL IAM Database Authentication for Groups
+
 **Note:** This project is experimental and is not an officially supported Google product.
 
 GroupSync is a self-deployed example app that provides support for managing [Cloud SQL IAM Database Authentication](https://cloud.google.com/sql/docs/mysql/authentication) for groups. GroupSync leverages [Cloud Run](https://cloud.google.com/run), [Cloud Scheduler](https://cloud.google.com/scheduler), and the [Cloud SQL Python Connector](https://github.com/googlecloudplatform/cloud-sql-python-connector) to consistently update and sync Cloud SQL instances based on IAM groups. It will create missing database IAM users, GRANT roles to database IAM users based on their IAM groups, and REVOKE roles from database IAM users no longer in IAM groups.
