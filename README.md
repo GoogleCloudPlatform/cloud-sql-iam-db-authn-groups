@@ -1,6 +1,6 @@
 # NOTE
 
-Cloud SQL for MySQL has support for Group IAM Authentication. We recommend all MySQL customers use this feature instead of the workaround here.
+Cloud SQL for MySQL 8.0+ has support for Group IAM Authentication. We recommend all MySQL 8.0+ customers use this feature instead of the workaround here.
 
 Cloud SQL for Postgres will have support for Group IAM Authentication soon.
 
