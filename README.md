@@ -1,4 +1,4 @@
-# NOTE
+# :warning: NOTE
 
 Cloud SQL for MySQL 8.0+ has support for [Group IAM Authentication][group-iam-auth]. 
 We recommend all MySQL 8.0+ customers use this feature instead of the workaround here.
