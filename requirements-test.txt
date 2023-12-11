@@ -1,6 +1,6 @@
 pytest==7.4.0
 pytest-asyncio==0.21.1
-quart==0.17.0
+quart==0.19.4
 SQLAlchemy==1.4.46
 google-auth==2.16.1
 PyMySQL==1.1.0

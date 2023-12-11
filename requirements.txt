@@ -1,4 +1,4 @@
-quart==0.17.0
+quart==0.19.4
 hypercorn==0.14.3
 SQLAlchemy==1.4.46
 google-auth==2.16.1
