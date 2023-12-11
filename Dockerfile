@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # use python image
-FROM python:3.9
+FROM python:3.12
 
 # Allow statements and log messages to immediately appear in Knative logs
 ENV PYTHONUNBUFFERED True
