@@ -7,3 +7,4 @@ pg8000==1.30.1
 cloud-sql-python-connector==0.4.1
 google-cloud-logging==3.5.0
 aiohttp==3.8.6
+Werkzeug==2.3.0
